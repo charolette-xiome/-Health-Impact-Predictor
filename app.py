@@ -92,6 +92,48 @@ def predict():
     pred = knn_mean_predict_one(x_scaled, k)
     return jsonify({"prediction": pred})
 
+import json
+import numpy as np
+
+# We’ll assume all variables from your training script still exist:
+# X_train, y_train, imputer, scaler, etc.
+
+# Prepare data for saving
+model_data = {
+    "k": 1000,
+    "feature_names": FEATURES,
+    "X_train": np.round(X_train, 6).tolist(),
+    "y_train": np.round(y_train, 6).tolist(),
+    "input_fill": imputer.statistics_.round(6).tolist(),
+    "scaler_mean": scaler.mean_.round(6).tolist(),
+    "scaler_scale": scaler.scale_.round(6).tolist(),
+}
+
+# Save model JSON
+OUTPUT_MODEL_JSON = "model_data.json"
+with open(OUTPUT_MODEL_JSON, "w", encoding="utf-8") as f:
+    json.dump(model_data, f, indent=2)
+
+print(f"✅ Saved model_data.json successfully to {OUTPUT_MODEL_JSON}")
+
+with open("model_data.json", "r") as f:
+    model_data = json.load(f)
+
+X_train = np.array(model_data["X_train"])
+y_train = np.array(model_data["y_train"])
+scaler_mean = np.array(model_data["scaler_mean"])
+scaler_scale = np.array(model_data["scaler_scale"])
+input_fill = np.array(model_data["input_fill"])
+FEATURES = model_data["feature_names"]
+k = model_data["k"]
+
+def prepare_input(data):
+    arr = np.array(data, dtype=float)
+    arr = np.where(np.isnan(arr), input_fill, arr)
+    arr = (arr - scaler_mean) / scaler_scale
+    return arr.reshape(1, -1)
+
+
 if __name__ == "__main__":
     print("Starting server on http://0.0.0.0:5000 - loading model_data.json")
     app.run(host="0.0.0.0", port=5000, debug=True)
