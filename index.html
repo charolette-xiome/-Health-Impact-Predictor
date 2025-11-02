@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Respiratory Admissions Predictor — Live Cities</title>
+    <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+    <main class="container">
+        <h1>Respiratory Admissions Predictor</h1>
+
+        <section class="mode">
+            <label for="modeSelect">Prediction mode:</label>
+            <select id="modeSelect">
+                <option value="client">Client-side (static, uses model_data.json)</option>
+                <option value="api">API (remote endpoint)</option>
+            </select>
+
+            <div id="apiConfig" class="hidden config-row">
+                <label for="apiUrl">API URL (POST /predict):</label>
+                <input id="apiUrl" placeholder="https://your-api.example.com/predict" />
+            </div>
+        </section>
+
+        <section class="city-select">
+            <label>Select cities to fetch live data for (automated & displayed):</label>
+            <div class="city-chips" id="cityChips">
+                <!-- chips inserted by JS -->
+            </div>
+            <div class="btn-row">
+                <button id="fetchCitiesBtn" class="primary">Fetch live for selected cities</button>
+                <button id="predictAllBtn">Predict all</button>
+                <button id="clearBtn">Clear cards</button>
+            </div>
+        </section>
+
+        <section id="cardsContainer" class="cards-grid">
+            <!-- city cards (one per city) will be inserted here -->
+        </section>
+
+        <section class="instructions">
+            <h3>Notes</h3>
+            <ul>
+                <li>Client mode expects a `model_data.json` in the same repo. See instructions in script file for
+                    format.</li>
+                <li>API mode expects a POST JSON endpoint accepting `{"features":[...]} -> {"prediction": number}`.</li>
+                <li>Add API keys for OpenWeatherMap and (optionally) other providers inside <code>script.js</code>.</li>
+            </ul>
+        </section>
+    </main>
+
+    <script src="script.js"></script>
+</body>
+
+</html>
