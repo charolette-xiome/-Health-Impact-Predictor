@@ -31,9 +31,17 @@
                 <!-- chips inserted by JS -->
             </div>
             <div class="btn-row">
+                <button id="createCardsBtn">Create cards for selected cities</button>
                 <button id="fetchCitiesBtn" class="primary">Fetch live for selected cities</button>
                 <button id="predictAllBtn">Predict all</button>
                 <button id="clearBtn">Clear cards</button>
+            </div>
+
+            <div style="margin-top:10px;">
+                <label style="display:inline-flex; align-items:center; gap:8px;">
+                    <input type="checkbox" id="editableByDefault" />
+                    <span style="font-size:13px; color:#6b7280">Make inputs editable by default (when cards created)</span>
+                </label>
             </div>
         </section>
 
@@ -44,10 +52,11 @@
         <section class="instructions">
             <h3>Notes</h3>
             <ul>
-                <li>Client mode expects a `model_data.json` in the same repo. See instructions in script file for
+                <li>Client mode expects a <code>model_data.json</code> in the same repo. See instructions in script file for
                     format.</li>
-                <li>API mode expects a POST JSON endpoint accepting `{"features":[...]} -> {"prediction": number}`.</li>
+                <li>API mode expects a POST JSON endpoint accepting <code>{"features":[...]}</code> -> <code>{"prediction": number}</code>.</li>
                 <li>Add API keys for OpenWeatherMap and (optionally) other providers inside <code>script.js</code>.</li>
+                <li>You can now create cards (without fetching) and manually enter values — check "Make inputs editable by default" to have inputs unlocked when cards are created.</li>
             </ul>
         </section>
     </main>
