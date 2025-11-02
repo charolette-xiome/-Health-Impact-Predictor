@@ -177,4 +177,56 @@ button.primary {
     .fields-grid {
         grid-template-columns: 1fr
     }
+
+}
+
+/* ---------- UX tweaks for editable vs locked inputs (append to style.css) ---------- */
+
+/* utility to hide elements when JS toggles .hidden */
+.hidden { display: none !important; }
+
+/* locked inputs: show subtle disabled look and not-allowed cursor */
+.field input[readonly] {
+    background: #f5f7fb;        /* slightly muted */
+    color: #475569;
+    cursor: not-allowed;
+    opacity: 0.85;
+}
+
+/* editable inputs: slightly more visible and show pointer for typing */
+.field input:not([readonly]) {
+    background: #fffbe6;        /* warm tint to attract attention */
+    box-shadow: 0 1px 0 rgba(16,24,40,0.02) inset;
+    cursor: text;
+}
+
+/* focus styling (keyboard users) - visible outline */
+.field input:focus {
+    outline: 3px solid rgba(37,99,235,0.12);
+    outline-offset: 2px;
+}
+
+/* edit/lock button align and size */
+.card-actions button {
+    padding: 7px 10px;
+    font-size: 13px;
+}
+
+/* make chips slightly bigger on mobile and easier to tap */
+@media (max-width: 820px) {
+    .chip { padding: 10px 14px; font-size: 15px; }
+}
+
+/* small visual hint in card header when inputs are locked vs editable */
+.card h3.locked::after {
+    content: " — locked";
+    font-size: 12px;
+    color: var(--muted);
+    margin-left: 8px;
+}
+.card h3.editable::after {
+    content: " — editable";
+    font-size: 12px;
+    color: #059669; /* green */
+    margin-left: 8px;
 }
