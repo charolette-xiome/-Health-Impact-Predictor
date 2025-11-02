@@ -14,7 +14,6 @@ const FEATURES = [
 const CITIES = ['Delhi', 'Mumbai', 'Chennai', 'Kolkata', 'Patna'];
 
 let modelData = null;
-let useClient = true;
 
 /* ----------------- UI helpers ----------------- */
 function $(id) { return document.getElementById(id); }
@@ -25,13 +24,13 @@ function el(tag, props = {}, children = []) {
         else if (k === 'text') e.textContent = props[k];
         else e.setAttribute(k, props[k]);
     }
-    (Array.isArray(children) ? children : [children]).forEach(c => { if (!c) return; e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
+    (Array.isArray(children) ? children : [children]).forEach(c => { if (!c && c !== 0) return; e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
     return e;
 }
 
 /* ------------- Build city selection chips -------------- */
 function buildCityChips() {
-    const container = document.getElementById('cityChips');
+    const container = $('cityChips');
     container.innerHTML = '';
     for (const city of CITIES) {
         const chip = el('div', { class: 'chip selected', 'data-city': city }, city);
@@ -45,7 +44,9 @@ function selectedCities() {
 }
 
 /* ------------- Cards (one per city) ------------------- */
-function makeCardForCity(city) {
+function makeCardForCity(city, options = {}) {
+    // options: { editableByDefault: boolean }
+    const editableByDefault = !!options.editableByDefault;
     const card = el('div', { class: 'card', id: `card_${city}` });
     card.appendChild(el('h3', { text: city }));
     const fieldsGrid = el('div', { class: 'fields-grid' });
@@ -53,8 +54,12 @@ function makeCardForCity(city) {
     for (const f of FEATURES) {
         const field = el('div', { class: 'field' });
         field.appendChild(el('label', { text: f }));
-        const input = el('input', { type: 'number', id: `${city}__${f}`, placeholder: 'leave blank to use model/data default' });
-        input.addEventListener('input', () => { /* allow editing */ });
+        // allow decimals, step any
+        const input = el('input', { type: 'number', id: `${city}__${f}`, placeholder: 'leave blank to use model/data default', step: 'any' });
+        // Set editable/readOnly according to editableByDefault
+        input.readOnly = !editableByDefault;
+        // make it easier to clear field with double-click
+        input.addEventListener('dblclick', () => { input.value = ''; });
         field.appendChild(input);
         fieldsGrid.appendChild(field);
     }
@@ -62,10 +67,10 @@ function makeCardForCity(city) {
 
     const actions = el('div', { class: 'card-actions' });
     const predictBtn = el('button', { class: 'primary', text: 'Predict' });
-    const editBtn = el('button', { text: 'Toggle edit' });
+    const editBtn = el('button', { text: editableByDefault ? 'Lock inputs' : 'Unlock inputs' });
     const meta = el('div', { class: 'small-muted', id: `meta_${city}`, text: '' });
     predictBtn.addEventListener('click', () => predictForCity(city));
-    editBtn.addEventListener('click', () => toggleCardInputs(city));
+    editBtn.addEventListener('click', () => toggleCardInputs(city, editBtn));
     actions.appendChild(predictBtn);
     actions.appendChild(editBtn);
     actions.appendChild(meta);
@@ -77,9 +82,14 @@ function makeCardForCity(city) {
     return card;
 }
 
-function toggleCardInputs(city) {
+function toggleCardInputs(city, buttonEl = null) {
     const inputs = document.querySelectorAll(`#card_${city} input`);
-    inputs.forEach(i => i.readOnly = !i.readOnly);
+    let anyReadOnly = false;
+    inputs.forEach(i => { if (i.readOnly) anyReadOnly = true; });
+    // If any are readOnly -> unlock all; else lock all
+    const toReadOnly = !anyReadOnly;
+    inputs.forEach(i => i.readOnly = toReadOnly);
+    if (buttonEl) buttonEl.textContent = toReadOnly ? 'Unlock inputs' : 'Lock inputs';
 }
 
 /* ---------- load client-side model_data.json ---------- */
@@ -89,7 +99,6 @@ async function loadModelData() {
         if (!r.ok) { modelData = null; console.warn('model_data.json not present'); return false; }
         modelData = await r.json();
         console.log('Loaded client model_data.json', modelData);
-        // If scaler fields exist, ensure they are arrays of length D
         return true;
     } catch (err) {
         console.warn('Error loading model_data.json', err);
@@ -120,35 +129,19 @@ function knnPredictSingle(x_query, k) {
     return sum / top.length;
 }
 
-/* ------------- scaling support ----------------- */
-function maybeScaleArray(arr) {
-    // if modelData contains scaler_mean & scaler_scale, apply: (arr - mean)/scale
-    if (!modelData) return arr;
-    if (modelData.scaler_mean && modelData.scaler_scale) {
-        const mean = modelData.scaler_mean;
-        const scale = modelData.scaler_scale;
-        const scaled = arr.map((v, i) => Number.isNaN(v) ? NaN : ((v - mean[i]) / (scale[i] === 0 ? 1e-6 : scale[i])));
-        return scaled;
-    }
-    // else, assume X_train already scaled and arr must be scaled externally; we will try to fallback by using means in modelData
-    return arr;
-}
-
 /* ------------- Predict for one city (client or API) -------------- */
 async function predictForCity(city) {
-    const mode = document.getElementById('modeSelect').value;
-    const apiUrl = document.getElementById('apiUrl').value.trim();
+    const mode = $('modeSelect').value;
+    const apiUrl = $('apiUrl').value.trim();
 
     // read inputs for this city (if blank put NaN)
     const raw = FEATURES.map(f => {
-        const v = document.getElementById(`${city}__${f}`).value;
+        const v = $(`${city}__${f}`).value;
         return v === '' ? NaN : Number(v);
     });
 
-    // if client mode, fill NaNs with column means (if present) and scale if scaler provided
     if (mode === 'client') {
-        if (!modelData) { document.getElementById(`result_${city}`).textContent = 'No client model loaded'; return; }
-        // compute column means from X_train if provided
+        if (!modelData) { $(`result_${city}`).textContent = 'No client model loaded'; return; }
         const D = modelData.X_train[0].length;
         const means = new Array(D).fill(0);
         for (let j = 0; j < D; j++) {
@@ -159,33 +152,30 @@ async function predictForCity(city) {
             }
             means[j] = c > 0 ? s / c : 0;
         }
-        // If modelData indicates X_train is SCALED (recommended) then the inputs must be scaled too.
         let xPrepared = raw.slice();
-        // Replace NaNs with either unscaled mean if scaler not provided (rare), else we will replace with mean of original feature
-        for (let i = 0; i < xPrepared.length; i++) { if (Number.isNaN(xPrepared[i])) xPrepared[i] = modelData.input_fill && modelData.input_fill[i] !== undefined ? modelData.input_fill[i] : means[i]; }
-        // If scaler exists in modelData apply scaling
+        for (let i = 0; i < xPrepared.length; i++) {
+            if (Number.isNaN(xPrepared[i])) {
+                xPrepared[i] = modelData.input_fill && modelData.input_fill[i] !== undefined ? modelData.input_fill[i] : means[i];
+            }
+        }
         if (modelData.scaler_mean && modelData.scaler_scale) {
             xPrepared = xPrepared.map((v, i) => ((v - modelData.scaler_mean[i]) / (modelData.scaler_scale[i] === 0 ? 1e-6 : modelData.scaler_scale[i])));
         } else {
-            // If X_train in modelData already scaled, we assume modelData.X_train is scaled and we need to scale inputs similarly.
-            // If you saved model_data.json with X_train already scaled and without scaler_mean/scale, you should save scaler or provide scaled inputs.
-            // Here we attempt to fall back: if modelData.X_train mean is near 0 and std near 1, assume scaled and we replace NaN with 0.
             xPrepared = xPrepared.map((v, i) => Number.isFinite(v) ? v : 0);
         }
 
         const k = modelData.k || 5;
         try {
             const pred = knnPredictSingle(xPrepared, Math.min(k, modelData.X_train.length));
-            document.getElementById(`result_${city}`).textContent = Number.isFinite(pred) ? pred.toFixed(3) : String(pred);
-            document.getElementById(`meta_${city}`).textContent = `client KNN (k=${k}, n_train=${modelData.X_train.length})`;
+            $(`result_${city}`).textContent = Number.isFinite(pred) ? pred.toFixed(3) : String(pred);
+            $(`meta_${city}`).textContent = `client KNN (k=${k}, n_train=${modelData.X_train.length})`;
         } catch (err) {
-            document.getElementById(`result_${city}`).textContent = 'Client prediction error: ' + err.message;
+            $(`result_${city}`).textContent = 'Client prediction error: ' + err.message;
         }
 
     } else {
-        // API mode: send raw values (unscaled). Your API should accept {features: [...]} in same order and do any scaling there.
-        if (!apiUrl) { document.getElementById(`result_${city}`).textContent = 'Set API URL in config'; return; }
-        document.getElementById(`result_${city}`).textContent = 'Predicting...';
+        if (!apiUrl) { $(`result_${city}`).textContent = 'Set API URL in config'; return; }
+        $(`result_${city}`).textContent = 'Predicting...';
         try {
             const resp = await fetch(apiUrl, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -194,10 +184,10 @@ async function predictForCity(city) {
             if (!resp.ok) { const txt = await resp.text(); throw new Error(txt || 'API error'); }
             const j = await resp.json();
             if (typeof j.prediction === 'undefined') { throw new Error('Invalid API response'); }
-            document.getElementById(`result_${city}`).textContent = Number.isFinite(j.prediction) ? Number(j.prediction).toFixed(3) : j.prediction;
-            document.getElementById(`meta_${city}`).textContent = `via API`;
+            $(`result_${city}`).textContent = Number.isFinite(j.prediction) ? Number(j.prediction).toFixed(3) : j.prediction;
+            $(`meta_${city}`).textContent = `via API`;
         } catch (err) {
-            document.getElementById(`result_${city}`).textContent = 'API error: ' + err.message;
+            $(`result_${city}`).textContent = 'API error: ' + err.message;
         }
     }
 }
@@ -212,14 +202,12 @@ const OPENWEATHER_KEY = 'YOUR_OPENWEATHERMAP_API_KEY';
 const OPENAQ_BASE = 'https://api.openaq.org/v2/latest'; // free
 
 async function fetchLiveForCity(city) {
-    // Map structure we will fill
     const mapping = {
         'AQI': NaN, 'PM2.5': NaN, 'PM10': NaN, 'NO2': NaN, 'SO2': NaN, 'CO': NaN, 'O3': NaN,
         'temperature': NaN, 'humidity': NaN, 'wind_speed': NaN, 'precipitation': NaN,
         'population_density': NaN, 'green_cover_percentage': NaN
     };
 
-    // 1) OpenWeather (city)
     try {
         if (OPENWEATHER_KEY && OPENWEATHER_KEY !== 'a5bbf40c9bbcd1843a7187b0f4a1520a2afbc0348d357d6c936e29d487dba92e') {
             const owUrl = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&units=metric&appid=${OPENWEATHER_KEY}`;
@@ -229,7 +217,6 @@ async function fetchLiveForCity(city) {
                 mapping.temperature = ow?.main?.temp ?? NaN;
                 mapping.humidity = ow?.main?.humidity ?? NaN;
                 mapping.wind_speed = ow?.wind?.speed ?? NaN;
-                // precipitation in mm for last 1 hour if provided
                 mapping.precipitation = (ow?.rain?.['1h'] ?? ow?.snow?.['1h']) ?? NaN;
             }
         }
@@ -237,13 +224,11 @@ async function fetchLiveForCity(city) {
         console.warn('OpenWeather error for', city, err);
     }
 
-    // 2) OpenAQ for pollutant concentrations (free, may not always have city-level records)
     try {
         const oaUrl = `${OPENAQ_BASE}?city=${encodeURIComponent(city)}&limit=100`;
         const qaResp = await fetch(oaUrl);
         if (qaResp.ok) {
             const qa = await qaResp.json();
-            // collect measurements
             const measures = {};
             if (Array.isArray(qa.results)) {
                 qa.results.forEach(loc => {
@@ -262,14 +247,11 @@ async function fetchLiveForCity(city) {
             mapping['SO2'] = mapping['SO2'] || avg('so2');
             mapping['O3'] = mapping['O3'] || avg('o3');
             mapping['CO'] = mapping['CO'] || avg('co');
-            // AQI not provided by OpenAQ; you could compute AQI locally from concentrations if desired.
         }
     } catch (err) {
         console.warn('OpenAQ error for', city, err);
     }
 
-    // 3) population_density & green_cover - not available from these APIs.
-    // You can maintain a small static lookup table (below we try to fetch from modelData if included)
     if (modelData && modelData.city_static && modelData.city_static[city]) {
         const cs = modelData.city_static[city];
         mapping['population_density'] = cs.population_density ?? mapping['population_density'];
@@ -280,15 +262,22 @@ async function fetchLiveForCity(city) {
 }
 
 /* ------------- Fill the card inputs for a city -------------- */
-function setCardInputsFromMapping(city, mapping) {
+function setCardInputsFromMapping(city, mapping, options = {}) {
+    // options: { editableByDefault: boolean } - we will NOT force readOnly here, we'll use the default flag
+    const editableByDefault = !!options.editableByDefault;
     for (const f of FEATURES) {
         const elid = `${city}__${f}`;
         const input = document.getElementById(elid);
         if (!input) continue;
         const v = mapping[f];
-        input.value = (v === undefined || v === null) ? '' : (Number.isFinite(v) ? Number(v).toFixed(3) : v);
-        // Keep inputs read-only so they are displayed but not accidentally edited; user can toggle edit
-        input.readOnly = true;
+        input.value = (v === undefined || v === null || Number.isNaN(v)) ? '' : (Number.isFinite(v) ? Number(v).toFixed(3) : v);
+        // Respect the default editable flag (do not force-readonly)
+        if (typeof input.readOnly === 'boolean') {
+            // keep current readOnly (if user already toggled), else set to default
+            // if it's empty string (initial) it will be false/true as set during creation
+        } else {
+            input.readOnly = !editableByDefault;
+        }
     }
 }
 
@@ -296,27 +285,38 @@ function setCardInputsFromMapping(city, mapping) {
 async function fetchLiveForSelectedCities() {
     const cities = selectedCities();
     if (!cities.length) { alert('Select at least one city'); return; }
-    document.getElementById('cardsContainer').innerHTML = '';
-    // prepare cards
+    // clear and create cards
+    $('cardsContainer').innerHTML = '';
+    const editableDefault = $('editableByDefault').checked;
     for (const city of cities) {
-        const c = makeCardForCity(city);
-        document.getElementById('cardsContainer').appendChild(c);
+        const c = makeCardForCity(city, { editableByDefault });
+        $('cardsContainer').appendChild(c);
     }
 
-    // try to (re)load modelData for client mode
     await loadModelData();
 
-    // fetch live data for each city and populate card
     for (const city of cities) {
         try {
             const mapping = await fetchLiveForCity(city);
-            setCardInputsFromMapping(city, mapping);
-            // automatically run prediction for each city after filling inputs
+            setCardInputsFromMapping(city, mapping, { editableByDefault });
             await predictForCity(city);
         } catch (err) {
             console.warn('Error fetching/predicting for', city, err);
-            document.getElementById(`result_${city}`).textContent = 'Fetch/predict error: ' + err.message;
+            $(`result_${city}`).textContent = 'Fetch/predict error: ' + err.message;
         }
+    }
+}
+
+/* ------------- Create cards only (no fetch) -------------- */
+function createCardsForSelectedCities() {
+    const cities = selectedCities();
+    if (!cities.length) { alert('Select at least one city'); return; }
+    $('cardsContainer').innerHTML = '';
+    const editableDefault = $('editableByDefault').checked;
+    for (const city of cities) {
+        const c = makeCardForCity(city, { editableByDefault });
+        $('cardsContainer').appendChild(c);
+        // leave inputs blank for manual entry
     }
 }
 
@@ -325,15 +325,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     buildCityChips();
     await loadModelData();
 
-    document.getElementById('fetchCitiesBtn').addEventListener('click', fetchLiveForSelectedCities);
-    document.getElementById('predictAllBtn').addEventListener('click', async () => {
-        const cities = selectedCities();
-        for (const city of cities) { await predictForCity(city); }
-    });
-    document.getElementById('clearBtn').addEventListener('click', () => { document.getElementById('cardsContainer').innerHTML = ''; });
+    $('fetchCitiesBtn').addEventListener('click', fetchLiveForSelectedCities);
+    $('createCardsBtn').addEventListener('click', createCardsForSelectedCities);
 
-    document.getElementById('modeSelect').addEventListener('change', (e) => {
+    $('predictAllBtn').addEventListener('click', async () => {
+        const cards = document.querySelectorAll('#cardsContainer .card');
+        for (const card of cards) {
+            const city = card.querySelector('h3').textContent;
+            await predictForCity(city);
+        }
+    });
+
+    $('clearBtn').addEventListener('click', () => { $('cardsContainer').innerHTML = ''; });
+
+    $('modeSelect').addEventListener('change', (e) => {
         const m = e.target.value;
-        document.getElementById('apiConfig').classList.toggle('hidden', m === 'client');
+        $('apiConfig').classList.toggle('hidden', m === 'client');
     });
 });
