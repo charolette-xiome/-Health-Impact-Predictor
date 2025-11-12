@@ -1,67 +1,100 @@
 <!doctype html>
 <html lang="en">
-
 <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-    <title>Respiratory Admissions Predictor — Live Cities</title>
-    <link rel="stylesheet" href="style.css" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Respiratory Admissions Predictor — Live Cities</title>
+  <link rel="stylesheet" href="style.css" />
 </head>
 
 <body>
-    <main class="container">
-        <h1>Respiratory Admissions Predictor</h1>
+  <main class="container" role="main">
+    <h1>Respiratory Admissions Predictor</h1>
 
-        <section class="mode">
-            <label for="modeSelect">Prediction mode:</label>
-            <select id="modeSelect">
-                <option value="client">Client-side (static, uses model_data.json)</option>
-                <option value="api">API (remote endpoint)</option>
-            </select>
+    <section class="mode">
+      <label for="modeSelect">Prediction mode:</label>
+      <select id="modeSelect">
+        <option value="client">Client-side (uses model_data.json)</option>
+        <option value="api">API (remote endpoint)</option>
+      </select>
 
-            <div id="apiConfig" class="hidden config-row">
-                <label for="apiUrl">API URL (POST /predict):</label>
-                <input id="apiUrl" placeholder="https://your-api.example.com/predict" />
-            </div>
-        </section>
+      <div id="apiConfig" class="hidden config-row">
+        <label for="apiUrl">API URL (POST /predict):</label>
+        <input id="apiUrl" placeholder="https://your-api.example.com/predict" />
+      </div>
+    </section>
 
-        <section class="city-select">
-            <label>Select cities to fetch live data for (automated & displayed):</label>
-            <div class="city-chips" id="cityChips">
-                <!-- chips inserted by JS -->
-            </div>
-            <div class="btn-row">
-                <button id="createCardsBtn">Create cards for selected cities</button>
-                <button id="fetchCitiesBtn" class="primary">Fetch live for selected cities</button>
-                <button id="predictAllBtn">Predict all</button>
-                <button id="clearBtn">Clear cards</button>
-            </div>
+    <section class="city-select">
+      <label>Select cities to fetch live data for (automated & displayed):</label>
+      <div class="city-chips" id="cityChips">
+        <!-- chips inserted by JS -->
+      </div>
 
-            <div style="margin-top:10px;">
-                <label style="display:inline-flex; align-items:center; gap:8px;">
-                    <input type="checkbox" id="editableByDefault" />
-                    <span style="font-size:13px; color:#6b7280">Make inputs editable by default (when cards created)</span>
-                </label>
-            </div>
-        </section>
+      <div class="btn-row">
+        <button id="createCardsBtn">Create cards for selected cities</button>
+        <button id="fetchCitiesBtn" class="primary">Fetch live for selected cities</button>
+        <button id="predictAllBtn">Predict all</button>
+        <button id="clearBtn">Clear cards</button>
+      </div>
 
-        <section id="cardsContainer" class="cards-grid">
-            <!-- city cards (one per city) will be inserted here -->
-        </section>
+      <div style="margin-top:10px;">
+        <label style="display:inline-flex; align-items:center; gap:8px;">
+          <input type="checkbox" id="editableByDefault" />
+          <span style="font-size:13px; color:#6b7280">Make inputs editable by default (when cards created)</span>
+        </label>
+      </div>
+    </section>
 
-        <section class="instructions">
-            <h3>Notes</h3>
-            <ul>
-                <li>Client mode expects a <code>model_data.json</code> in the same repo. See instructions in script file for
-                    format.</li>
-                <li>API mode expects a POST JSON endpoint accepting <code>{"features":[...]}</code> -> <code>{"prediction": number}</code>.</li>
-                <li>Add API keys for OpenWeatherMap and (optionally) other providers inside <code>script.js</code>.</li>
-                <li>You can now create cards (without fetching) and manually enter values — check "Make inputs editable by default" to have inputs unlocked when cards are created.</li>
-            </ul>
-        </section>
-    </main>
+    <!-- NEW: Live Data Panel Controls -->
+    <section class="live-controls">
+      <h3>Live Data</h3>
+      <div class="live-actions">
+        <button id="showLiveBtn" class="primary">Show live data for selected city</button>
+        <label style="display:inline-flex; align-items:center; gap:8px; margin-left:12px;">
+          <input type="checkbox" id="autoRefreshToggle" />
+          <span style="font-size:13px; color:#6b7280">Auto-refresh</span>
+        </label>
+        <label style="margin-left:12px; font-size:13px; color:#6b7280;">
+          Interval: <input id="refreshInterval" type="number" min="10" value="60" style="width:72px; margin-left:6px; padding:6px;" /> sec
+        </label>
+      </div>
+      <div id="liveDataPanel" class="live-panel hidden" aria-live="polite">
+        <!-- populated by script.js -->
+        <div class="live-header">
+          <h4 id="liveCityName">City</h4>
+          <div id="liveUpdated" class="small-muted">Last updated: —</div>
+        </div>
 
-    <script src="script.js"></script>
+        <div class="live-grid">
+          <div class="live-row"><div class="live-key">Temperature</div><div class="live-value" id="live_temperature">—</div></div>
+          <div class="live-row"><div class="live-key">Humidity</div><div class="live-value" id="live_humidity">—</div></div>
+          <div class="live-row"><div class="live-key">Wind speed</div><div class="live-value" id="live_wind_speed">—</div></div>
+          <div class="live-row"><div class="live-key">Precipitation (1h)</div><div class="live-value" id="live_precipitation">—</div></div>
+
+          <div class="live-row"><div class="live-key">PM2.5</div><div class="live-value" id="live_PM2_5">—</div></div>
+          <div class="live-row"><div class="live-key">PM10</div><div class="live-value" id="live_PM10">—</div></div>
+          <div class="live-row"><div class="live-key">NO2</div><div class="live-value" id="live_NO2">—</div></div>
+          <div class="live-row"><div class="live-key">SO2</div><div class="live-value" id="live_SO2">—</div></div>
+          <div class="live-row"><div class="live-key">O3</div><div class="live-value" id="live_O3">—</div></div>
+          <div class="live-row"><div class="live-key">CO</div><div class="live-value" id="live_CO">—</div></div>
+
+          <div class="live-row"><div class="live-key">Population density</div><div class="live-value" id="live_population_density">—</div></div>
+          <div class="live-row"><div class="live-key">Green cover %</div><div class="live-value" id="live_green_cover_percentage">—</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="cardsContainer" class="cards-grid"></section>
+
+    <section class="instructions">
+      <h3>Notes</h3>
+      <ul>
+        <li>Make sure <code>model_data.json</code> is served at <code>/model_data.json</code>.</li>
+        <li>Set your OpenWeather API key in <code>script.js</code>.</li>
+      </ul>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
 </body>
-
 </html>
