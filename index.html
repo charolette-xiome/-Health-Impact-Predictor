@@ -1,100 +1,161 @@
 <!doctype html>
 <html lang="en">
+
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Respiratory Admissions Predictor — Live Cities</title>
-  <link rel="stylesheet" href="style.css" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Respiratory Admissions Predictor — Live Cities</title>
+    <link rel="stylesheet" href="style.css" />
 </head>
 
 <body>
-  <main class="container" role="main">
-    <h1>Respiratory Admissions Predictor</h1>
+    <main class="container">
+        <h1>Respiratory Admissions Predictor</h1>
 
-    <section class="mode">
-      <label for="modeSelect">Prediction mode:</label>
-      <select id="modeSelect">
-        <option value="client">Client-side (uses model_data.json)</option>
-        <option value="api">API (remote endpoint)</option>
-      </select>
+        <section class="mode">
+            <label for="modeSelect">Prediction mode:</label>
+            <select id="modeSelect">
+                <option value="client">Client-side (static, uses model_data.json)</option>
+                <option value="api">API (remote endpoint)</option>
+            </select>
 
-      <div id="apiConfig" class="hidden config-row">
-        <label for="apiUrl">API URL (POST /predict):</label>
-        <input id="apiUrl" placeholder="https://your-api.example.com/predict" />
-      </div>
-    </section>
+            <div id="apiConfig" class="hidden config-row">
+                <label for="apiUrl">API URL (POST /predict):</label>
+                <input id="apiUrl" placeholder="https://your-api.example.com/predict" />
+            </div>
+        </section>
 
-    <section class="city-select">
-      <label>Select cities to fetch live data for (automated & displayed):</label>
-      <div class="city-chips" id="cityChips">
-        <!-- chips inserted by JS -->
-      </div>
+        <section class="city-select">
+            <label>Select cities to fetch live data for (automated & displayed):</label>
+            <div class="city-chips" id="cityChips">
+                <!-- chips inserted by JS -->
+            </div>
+            <div class="btn-row">
+                <button id="createCardsBtn">Create cards for selected cities</button>
+                <button id="fetchCitiesBtn" class="primary">Fetch live for selected cities</button>
+                <button id="predictAllBtn">Predict all</button>
+                <button id="clearBtn">Clear cards</button>
+            </div>
 
-      <div class="btn-row">
-        <button id="createCardsBtn">Create cards for selected cities</button>
-        <button id="fetchCitiesBtn" class="primary">Fetch live for selected cities</button>
-        <button id="predictAllBtn">Predict all</button>
-        <button id="clearBtn">Clear cards</button>
-      </div>
+            <div style="margin-top:10px;">
+                <label style="display:inline-flex; align-items:center; gap:8px;">
+                    <input type="checkbox" id="editableByDefault" />
+                    <span style="font-size:13px; color:#6b7280">Make inputs editable by default (when cards created)</span>
+                </label>
+            </div>
+        </section>
 
-      <div style="margin-top:10px;">
-        <label style="display:inline-flex; align-items:center; gap:8px;">
-          <input type="checkbox" id="editableByDefault" />
-          <span style="font-size:13px; color:#6b7280">Make inputs editable by default (when cards created)</span>
-        </label>
-      </div>
-    </section>
+        <!-- ====== NEW: Live Data Display (non-destructive add) ====== -->
+        <!-- This small panel displays current live values for the selected city.
+             Your existing script.js can populate the fields below if it contains
+             the corresponding DOM IDs (liveCityName, live_temperature, etc.). -->
+        <section class="live-display" aria-labelledby="liveLabel" style="margin-top:18px;">
+            <h3 id="liveLabel" style="margin-bottom:8px;">Live data (selected city)</h3>
 
-    <!-- NEW: Live Data Panel Controls -->
-    <section class="live-controls">
-      <h3>Live Data</h3>
-      <div class="live-actions">
-        <button id="showLiveBtn" class="primary">Show live data for selected city</button>
-        <label style="display:inline-flex; align-items:center; gap:8px; margin-left:12px;">
-          <input type="checkbox" id="autoRefreshToggle" />
-          <span style="font-size:13px; color:#6b7280">Auto-refresh</span>
-        </label>
-        <label style="margin-left:12px; font-size:13px; color:#6b7280;">
-          Interval: <input id="refreshInterval" type="number" min="10" value="60" style="width:72px; margin-left:6px; padding:6px;" /> sec
-        </label>
-      </div>
-      <div id="liveDataPanel" class="live-panel hidden" aria-live="polite">
-        <!-- populated by script.js -->
-        <div class="live-header">
-          <h4 id="liveCityName">City</h4>
-          <div id="liveUpdated" class="small-muted">Last updated: —</div>
-        </div>
+            <div class="live-controls" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
+                <button id="showLiveBtn" type="button" class="primary">Show live data for selected city</button>
 
-        <div class="live-grid">
-          <div class="live-row"><div class="live-key">Temperature</div><div class="live-value" id="live_temperature">—</div></div>
-          <div class="live-row"><div class="live-key">Humidity</div><div class="live-value" id="live_humidity">—</div></div>
-          <div class="live-row"><div class="live-key">Wind speed</div><div class="live-value" id="live_wind_speed">—</div></div>
-          <div class="live-row"><div class="live-key">Precipitation (1h)</div><div class="live-value" id="live_precipitation">—</div></div>
+                <label style="display:inline-flex; align-items:center; gap:8px; font-size:13px; color:#6b7280;">
+                    <input type="checkbox" id="autoRefreshToggle" />
+                    Auto-refresh
+                </label>
 
-          <div class="live-row"><div class="live-key">PM2.5</div><div class="live-value" id="live_PM2_5">—</div></div>
-          <div class="live-row"><div class="live-key">PM10</div><div class="live-value" id="live_PM10">—</div></div>
-          <div class="live-row"><div class="live-key">NO2</div><div class="live-value" id="live_NO2">—</div></div>
-          <div class="live-row"><div class="live-key">SO2</div><div class="live-value" id="live_SO2">—</div></div>
-          <div class="live-row"><div class="live-key">O3</div><div class="live-value" id="live_O3">—</div></div>
-          <div class="live-row"><div class="live-key">CO</div><div class="live-value" id="live_CO">—</div></div>
+                <label style="font-size:13px; color:#6b7280; display:inline-flex; align-items:center; gap:6px;">
+                    Interval (sec):
+                    <input id="refreshInterval" type="number" min="10" value="60" style="width:80px; padding:6px;" />
+                </label>
+            </div>
 
-          <div class="live-row"><div class="live-key">Population density</div><div class="live-value" id="live_population_density">—</div></div>
-          <div class="live-row"><div class="live-key">Green cover %</div><div class="live-value" id="live_green_cover_percentage">—</div></div>
-        </div>
-      </div>
-    </section>
+            <!-- The panel below is intentionally minimal. Your JS can show/hide it
+                 and populate the child elements. -->
+            <div id="liveDataPanel" class="live-panel hidden" aria-live="polite" style="border:1px solid #eef6ff; padding:12px; border-radius:10px; background:#fbfdff;">
+                <div class="live-header" style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;">
+                    <h4 id="liveCityName" style="margin:0; font-size:18px;">—</h4>
+                    <div id="liveUpdated" class="small-muted" style="font-size:13px; color:#6b7280;">Last updated: —</div>
+                </div>
 
-    <section id="cardsContainer" class="cards-grid"></section>
+                <div class="live-grid" style="display:grid; grid-template-columns:repeat(2,1fr); gap:8px 18px;">
+                    <div class="live-row" style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:#fff;border-radius:8px;border:1px solid #f0f6ff;">
+                        <div class="live-key" style="color:var(--muted);font-size:13px;">Temperature</div>
+                        <div class="live-value" id="live_temperature" style="font-weight:600">—</div>
+                    </div>
 
-    <section class="instructions">
-      <h3>Notes</h3>
-      <ul>
-        <li>Make sure <code>model_data.json</code> is served at <code>/model_data.json</code>.</li>
-        <li>Set your OpenWeather API key in <code>script.js</code>.</li>
-      </ul>
-    </section>
-  </main>
+                    <div class="live-row" style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:#fff;border-radius:8px;border:1px solid #f0f6ff;">
+                        <div class="live-key" style="color:var(--muted);font-size:13px;">Humidity</div>
+                        <div class="live-value" id="live_humidity" style="font-weight:600">—</div>
+                    </div>
 
-  <script src="script.js"></script>
+                    <div class="live-row" style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:#fff;border-radius:8px;border:1px solid #f0f6ff;">
+                        <div class="live-key" style="color:var(--muted);font-size:13px;">Wind speed</div>
+                        <div class="live-value" id="live_wind_speed" style="font-weight:600">—</div>
+                    </div>
+
+                    <div class="live-row" style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:#fff;border-radius:8px;border:1px solid #f0f6ff;">
+                        <div class="live-key" style="color:var(--muted);font-size:13px;">Precipitation (1h)</div>
+                        <div class="live-value" id="live_precipitation" style="font-weight:600">—</div>
+                    </div>
+
+                    <div class="live-row" style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:#fff;border-radius:8px;border:1px solid #f0f6ff;">
+                        <div class="live-key" style="color:var(--muted);font-size:13px;">PM2.5</div>
+                        <div class="live-value" id="live_PM2_5" style="font-weight:600">—</div>
+                    </div>
+
+                    <div class="live-row" style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:#fff;border-radius:8px;border:1px solid #f0f6ff;">
+                        <div class="live-key" style="color:var(--muted);font-size:13px;">PM10</div>
+                        <div class="live-value" id="live_PM10" style="font-weight:600">—</div>
+                    </div>
+
+                    <div class="live-row" style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:#fff;border-radius:8px;border:1px solid #f0f6ff;">
+                        <div class="live-key" style="color:var(--muted);font-size:13px;">NO2</div>
+                        <div class="live-value" id="live_NO2" style="font-weight:600">—</div>
+                    </div>
+
+                    <div class="live-row" style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:#fff;border-radius:8px;border:1px solid #f0f6ff;">
+                        <div class="live-key" style="color:var(--muted);font-size:13px;">SO2</div>
+                        <div class="live-value" id="live_SO2" style="font-weight:600">—</div>
+                    </div>
+
+                    <div class="live-row" style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:#fff;border-radius:8px;border:1px solid #f0f6ff;">
+                        <div class="live-key" style="color:var(--muted);font-size:13px;">O3</div>
+                        <div class="live-value" id="live_O3" style="font-weight:600">—</div>
+                    </div>
+
+                    <div class="live-row" style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:#fff;border-radius:8px;border:1px solid #f0f6ff;">
+                        <div class="live-key" style="color:var(--muted);font-size:13px;">CO</div>
+                        <div class="live-value" id="live_CO" style="font-weight:600">—</div>
+                    </div>
+
+                    <div class="live-row" style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:#fff;border-radius:8px;border:1px solid #f0f6ff;">
+                        <div class="live-key" style="color:var(--muted);font-size:13px;">Population density</div>
+                        <div class="live-value" id="live_population_density" style="font-weight:600">—</div>
+                    </div>
+
+                    <div class="live-row" style="display:flex;justify-content:space-between;align-items:center;padding:8px;background:#fff;border-radius:8px;border:1px solid #f0f6ff;">
+                        <div class="live-key" style="color:var(--muted);font-size:13px;">Green cover %</div>
+                        <div class="live-value" id="live_green_cover_percentage" style="font-weight:600">—</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <!-- ====== end Live Data Display ====== -->
+
+        <section id="cardsContainer" class="cards-grid">
+            <!-- city cards (one per city) will be inserted here -->
+        </section>
+
+        <section class="instructions">
+            <h3>Notes</h3>
+            <ul>
+                <li>Client mode expects a <code>model_data.json</code> in the same repo. See instructions in script file for
+                    format.</li>
+                <li>API mode expects a POST JSON endpoint accepting <code>{"features":[...]}</code> -> <code>{"prediction": number}</code>.</li>
+                <li>Add API keys for OpenWeatherMap and (optionally) other providers inside <code>script.js</code>.</li>
+                <li>You can now create cards (without fetching) and manually enter values — check "Make inputs editable by default" to have inputs unlocked when cards are created.</li>
+            </ul>
+        </section>
+    </main>
+
+    <script src="script.js" defer></script>
 </body>
+
 </html>
