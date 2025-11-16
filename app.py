@@ -142,7 +142,7 @@ def knn_mean_predict_one(x_scaled, k):
     k_eff = max(1, min(int(k), n_train))
     dists, idx = _nn.kneighbors(x_scaled.reshape(1, -1), n_neighbors=k_eff)
     neighbors_idx = idx[0]
-    return int(math.ceil(np.mean(y_train[neighbors_idx])))
+    return math.ceil(int(np.mean(y_train[neighbors_idx])))
 
 
 # ----- Routes ----- #
@@ -264,5 +264,6 @@ if __name__ == "__main__":
 
     logger.info("Starting Flask server on http://%s:%s (debug=%s)", HOST, PORT, DEBUG)
     app.run(host=HOST, port=PORT, debug=DEBUG)
+
 
 
