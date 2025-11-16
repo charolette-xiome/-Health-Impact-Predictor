@@ -191,7 +191,7 @@ def predict():
         return jsonify({"error": f"Invalid features: {str(e)}"}), 400
 
     try:
-        raw_pred = knn_mean_predict_one(x_scaled, k)
+        raw_pred = int(math.ceil(knn_mean_predict_one(x_scaled, k)))
         pred_ceiling = int(math.ceil(raw_pred)) if (raw_pred is not None and not math.isnan(raw_pred)) else None
         response = {
             "prediction_raw": raw_pred,
@@ -264,3 +264,4 @@ if __name__ == "__main__":
 
     logger.info("Starting Flask server on http://%s:%s (debug=%s)", HOST, PORT, DEBUG)
     app.run(host=HOST, port=PORT, debug=DEBUG)
+
