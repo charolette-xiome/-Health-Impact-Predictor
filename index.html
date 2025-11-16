@@ -32,7 +32,7 @@
         <!-- chips inserted by JS -->
       </div>
 
-      <div class="btn-row">
+      <div class="btn-row" style="margin-top:10px;">
         <button id="createCardsBtn">Create cards for selected cities</button>
         <button id="fetchCitiesBtn" class="primary">Fetch live for selected cities</button>
         <button id="predictAllBtn">Predict all</button>
@@ -51,9 +51,9 @@
     <section class="live-display" aria-labelledby="liveLabel" style="margin-top:18px;">
       <h3 id="liveLabel" style="margin-bottom:8px;">Live data (selected city)</h3>
 
-      <!-- controls: you can type a city name OR rely on selected chips (typed city takes priority) -->
+      <!-- controls: typed city takes priority over selected chips -->
       <div class="live-controls" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
-        <input id="liveCity" type="text" placeholder="Enter a city name (optional)" style="padding:8px 10px; border-radius:8px; border:1px solid #e6eefb; width:220px;" />
+        <input id="liveCity" type="text" placeholder="Enter a city name (optional — takes priority)" style="padding:8px 10px; border-radius:8px; border:1px solid #e6eefb; width:220px;" />
 
         <button id="showLiveBtn" type="button" class="primary">Show live data for selected city</button>
 
@@ -76,19 +76,28 @@
         </div>
 
         <div class="live-grid" id="liveGrid" style="display:grid; grid-template-columns:repeat(2,1fr); gap:8px 18px;">
-          <!-- These cells are placeholders; script will fill by ID or populate grid dynamically -->
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">Temperature</div><div class="live-value" id="live_temperature" style="font-weight:600">—</div></div>
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">Humidity</div><div class="live-value" id="live_humidity" style="font-weight:600">—</div></div>
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">Wind speed</div><div class="live-value" id="live_wind_speed" style="font-weight:600">—</div></div>
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">Precipitation (1h)</div><div class="live-value" id="live_precipitation" style="font-weight:600">—</div></div>
+          <!-- Weather -->
+          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">Temperature (°C)</div><div class="live-value" id="live_temperature" style="font-weight:600">—</div></div>
+          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">Humidity (%)</div><div class="live-value" id="live_humidity" style="font-weight:600">—</div></div>
 
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">PM2.5</div><div class="live-value" id="live_PM2_5" style="font-weight:600">—</div></div>
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">PM10</div><div class="live-value" id="live_PM10" style="font-weight:600">—</div></div>
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">NO2</div><div class="live-value" id="live_NO2" style="font-weight:600">—</div></div>
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">SO2</div><div class="live-value" id="live_SO2" style="font-weight:600">—</div></div>
+          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">Wind speed (m/s)</div><div class="live-value" id="live_wind_speed" style="font-weight:600">—</div></div>
+          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">Precipitation (mm, 1h)</div><div class="live-value" id="live_precipitation" style="font-weight:600">—</div></div>
 
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">O3</div><div class="live-value" id="live_O3" style="font-weight:600">—</div></div>
+          <!-- Pollutants -->
+          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">PM2.5 (µg/m³)</div><div class="live-value" id="live_PM2_5" style="font-weight:600">—</div></div>
+          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">PM10 (µg/m³)</div><div class="live-value" id="live_PM10" style="font-weight:600">—</div></div>
+
+          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">NO₂</div><div class="live-value" id="live_NO2" style="font-weight:600">—</div></div>
+          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">SO₂</div><div class="live-value" id="live_SO2" style="font-weight:600">—</div></div>
+
+          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">O₃</div><div class="live-value" id="live_O3" style="font-weight:600">—</div></div>
           <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">CO</div><div class="live-value" id="live_CO" style="font-weight:600">—</div></div>
+
+          <!-- AQI & meta -->
+          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">AQI (India / CPCB)</div><div class="live-value" id="live_AQI" style="font-weight:600">—</div></div>
+          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">AQI category</div><div class="live-value" id="live_AQI_category" style="font-weight:600">—</div></div>
+
+          <!-- Static / model info -->
           <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">Population density</div><div class="live-value" id="live_population_density" style="font-weight:600">—</div></div>
           <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">Green cover %</div><div class="live-value" id="live_green_cover_percentage" style="font-weight:600">—</div></div>
         </div>
@@ -97,17 +106,17 @@
     <!-- ===== end Live Data Display ===== -->
 
     <!-- --- Cards container (predictor) --- -->
-    <section id="cardsContainer" class="cards-grid">
+    <section id="cardsContainer" class="cards-grid" style="margin-top:18px;">
       <!-- city cards (one per city) will be inserted here by script.js -->
     </section>
 
     <!-- --- Notes --- -->
-    <section class="instructions">
+    <section class="instructions" style="margin-top:18px;">
       <h3>Notes</h3>
       <ul>
         <li>Client mode expects a <code>model_data.json</code> in the same repo (or served at <code>/model_data.json</code>).</li>
         <li>API mode expects a POST JSON endpoint accepting <code>{"features":[...]}</code> → <code>{"prediction": number}</code>.</li>
-        <li>Add your OpenWeatherMap API key in <code>script.js</code>.</li>
+        <li>For accurate AQI & to keep keys secret, run API calls from the server (e.g. <code>/api/air?city=Delhi</code>) rather than directly from the browser.</li>
       </ul>
     </section>
   </main>
