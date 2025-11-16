@@ -3,6 +3,7 @@
 /* ---------- Config ---------- */
 const OPENWEATHER_KEY = '4bf0b6858782f0a9d0d62454d7da65f4'; // your key
 const OPENAQ_BASE = 'https://api.openaq.org/v2/latest';
+const WEATHERAPI_KEY = 'a16e02bb1b734caba0895738251611'; // WeatherAPI key added
 
 const DEFAULT_FEATURES = [
   'AQI','PM2.5','PM10','NO2','SO2','CO','O3',
@@ -176,28 +177,73 @@ async function predictForCity(city) {
   }
 }
 
-/* ----------------- Live data fetch (OWM + OpenAQ) ----------------- */
+/* ----------------- Live data fetch (WeatherAPI + OWM + OpenAQ) ----------------- */
 async function fetchLiveForCity(city) {
   const mapping = {}; FEATURES.forEach(f=>mapping[f]=NaN);
-  // OpenWeather current weather
+
+  /* -------- WeatherAPI (primary for weather + AQ if available) --------
+     endpoint: https://api.weatherapi.com/v1/current.json?key=KEY&q=city&aqi=yes
+     available fields used:
+       - current.temp_c -> temperature (°C)
+       - current.humidity -> humidity (%)
+       - current.wind_kph -> convert to m/s
+       - current.precip_mm -> precipitation (mm)
+       - current.air_quality -> pm2_5, pm10, no2, so2, o3, co (if present)
+       - current.air_quality may also contain index fields like 'us-epa-index' or 'gb-defra-index'
+  ---------------------------------------------------------------------*/
+  try {
+    if (WEATHERAPI_KEY && WEATHERAPI_KEY !== '') {
+      const wUrl = `https://api.weatherapi.com/v1/current.json?key=${WEATHERAPI_KEY}&q=${encodeURIComponent(city)}&aqi=yes`;
+      const r = await fetch(wUrl);
+      if (r.ok) {
+        const w = await r.json();
+        // weather
+        if (typeof w?.current?.temp_c === 'number') mapping['temperature'] = Number.isFinite(mapping['temperature']) ? mapping['temperature'] : w.current.temp_c;
+        if (typeof w?.current?.humidity === 'number') mapping['humidity'] = Number.isFinite(mapping['humidity']) ? mapping['humidity'] : w.current.humidity;
+        if (typeof w?.current?.wind_kph === 'number') {
+          const wind_ms = w.current.wind_kph / 3.6; // convert km/h to m/s
+          mapping['wind_speed'] = Number.isFinite(mapping['wind_speed']) ? mapping['wind_speed'] : wind_ms;
+        }
+        if (typeof w?.current?.precip_mm === 'number') mapping['precipitation'] = Number.isFinite(mapping['precipitation']) ? mapping['precipitation'] : w.current.precip_mm;
+        // air quality (WeatherAPI sometimes provides pollutant concentrations under current.air_quality)
+        const aq = w?.current?.air_quality;
+        if (aq && typeof aq === 'object') {
+          // common keys: pm2_5, pm10, no2, so2, o3, co
+          if (typeof aq.pm2_5 === 'number') mapping['PM2.5'] = Number.isFinite(mapping['PM2.5']) ? mapping['PM2.5'] : aq.pm2_5;
+          if (typeof aq.pm10 === 'number') mapping['PM10'] = Number.isFinite(mapping['PM10']) ? mapping['PM10'] : aq.pm10;
+          if (typeof aq.no2 === 'number') mapping['NO2'] = Number.isFinite(mapping['NO2']) ? mapping['NO2'] : aq.no2;
+          if (typeof aq.so2 === 'number') mapping['SO2'] = Number.isFinite(mapping['SO2']) ? mapping['SO2'] : aq.so2;
+          if (typeof aq.o3 === 'number') mapping['O3'] = Number.isFinite(mapping['O3']) ? mapping['O3'] : aq.o3;
+          if (typeof aq.co === 'number') mapping['CO'] = Number.isFinite(mapping['CO']) ? mapping['CO'] : aq.co;
+          // AQI / indexes (optional)
+          if (typeof aq['us-epa-index'] !== 'undefined') mapping['AQI'] = Number.isFinite(mapping['AQI']) ? mapping['AQI'] : aq['us-epa-index'];
+          else if (typeof aq['gb-defra-index'] !== 'undefined') mapping['AQI'] = Number.isFinite(mapping['AQI']) ? mapping['AQI'] : aq['gb-defra-index'];
+        }
+      } else {
+        console.warn('WeatherAPI failed', r.status);
+      }
+    }
+  } catch (err) { console.warn('WeatherAPI error', err); }
+
+  // OpenWeather current weather (fallback / supplemental)
   try {
     if (OPENWEATHER_KEY && OPENWEATHER_KEY !== '') {
       const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&units=metric&appid=${OPENWEATHER_KEY}`;
       const r = await fetch(url);
       if (r.ok) {
         const ow = await r.json();
-        mapping['temperature'] = ow?.main?.temp ?? mapping['temperature'];
-        mapping['humidity'] = ow?.main?.humidity ?? mapping['humidity'];
-        mapping['wind_speed'] = ow?.wind?.speed ?? mapping['wind_speed'];
+        mapping['temperature'] = Number.isFinite(mapping['temperature']) ? mapping['temperature'] : (ow?.main?.temp ?? mapping['temperature']);
+        mapping['humidity'] = Number.isFinite(mapping['humidity']) ? mapping['humidity'] : (ow?.main?.humidity ?? mapping['humidity']);
+        mapping['wind_speed'] = Number.isFinite(mapping['wind_speed']) ? mapping['wind_speed'] : (ow?.wind?.speed ?? mapping['wind_speed']); // OpenWeather uses m/s
         const precip = (ow?.rain && typeof ow.rain['1h'] === 'number') ? ow.rain['1h'] : ((ow?.snow && typeof ow.snow['1h'] === 'number') ? ow.snow['1h'] : NaN);
-        mapping['precipitation'] = Number.isFinite(precip) ? precip : mapping['precipitation'];
+        mapping['precipitation'] = Number.isFinite(mapping['precipitation']) ? mapping['precipitation'] : (Number.isFinite(precip) ? precip : mapping['precipitation']);
       } else {
         console.warn('OpenWeather failed', r.status);
       }
     }
   } catch (err) { console.warn('OpenWeather error', err); }
 
-  // OpenAQ pollutants
+  // OpenAQ pollutants (additional source / fallback)
   try {
     const oaUrl = `${OPENAQ_BASE}?city=${encodeURIComponent(city)}&limit=100`;
     const r = await fetch(oaUrl);
