@@ -248,15 +248,34 @@ function multiplyFetchedAQI(raw) {
   return n * 50;
 }
 
-/* ---------- Live fetch (full) ---------- */
+/* Replace your current fetchLiveForCity with this aggressive-detection version */
 async function fetchLiveForCity(city) {
   const mapping = {}; FEATURES.forEach(f => mapping[f]=NaN);
   const debug = (label,obj) => { try { console.log(label, obj); } catch(e) {} };
 
-  // placeholders for raw responses
+  // raw responses
   let openAQ_raw = null, weatherAPI_raw = null, openWeather_raw = null;
 
-  // 1) OpenAQ — pollutant concentrations (µg/m3 typically)
+  // helper: shallow-scan object for numeric values that look like AQI indices
+  function findNumericCandidates(obj) {
+    const out = [];
+    if (!obj || typeof obj !== 'object') return out;
+    // shallow keys
+    for (const k of Object.keys(obj)) {
+      const v = obj[k];
+      if (typeof v === 'number' && Number.isFinite(v)) out.push({key:k, value:v, path:'root'});
+      // small nested objects we check a level deeper automatically
+      if (v && typeof v === 'object') {
+        for (const kk of Object.keys(v)) {
+          const vv = v[kk];
+          if (typeof vv === 'number' && Number.isFinite(vv)) out.push({key:k + '.' + kk, value: vv, path: 'nested'});
+        }
+      }
+    }
+    return out;
+  }
+
+  // 1) OpenAQ
   try {
     const oaUrl = `${OPENAQ_BASE}?city=${encodeURIComponent(city)}&limit=100`;
     const r = await fetch(oaUrl);
@@ -266,9 +285,9 @@ async function fetchLiveForCity(city) {
       const measures = {};
       openAQ_raw.results?.forEach(loc => { loc.measurements?.forEach(m => {
         const key = (m.parameter || '').toLowerCase();
-        if (!measures[key]) measures[key] = [];
+        if (!measures[key]) measures[key]=[];
         if (typeof m.value === 'number') measures[key].push(m.value);
-      });});
+      }); });
       const avg = key => (measures[key] && measures[key].length) ? measures[key].reduce((a,b)=>a+b,0)/measures[key].length : NaN;
       const pm25 = avg('pm25') || avg('pm2.5') || avg('pm_2_5') || NaN;
       const pm10 = avg('pm10') || avg('pm_10') || NaN;
@@ -281,7 +300,7 @@ async function fetchLiveForCity(city) {
     } else debug('OpenAQ failed status', r.status);
   } catch (err) { console.warn('OpenAQ error', err); }
 
-  // 2) WeatherAPI — weather + inline air_quality object
+  // 2) WeatherAPI
   try {
     if (WEATHERAPI_KEY) {
       const wUrl = `https://api.weatherapi.com/v1/current.json?key=${WEATHERAPI_KEY}&q=${encodeURIComponent(city)}&aqi=yes`;
@@ -294,40 +313,20 @@ async function fetchLiveForCity(city) {
         if (typeof w?.current?.humidity === 'number') mapping['humidity'] = Number.isFinite(mapping['humidity']) ? mapping['humidity'] : w.current.humidity;
         if (typeof w?.current?.wind_kph === 'number') mapping['wind_speed'] = Number.isFinite(mapping['wind_speed']) ? mapping['wind_speed'] : (w.current.wind_kph / 3.6);
         if (typeof w?.current?.precip_mm === 'number') mapping['precipitation'] = Number.isFinite(mapping['precipitation']) ? mapping['precipitation'] : w.current.precip_mm;
-        // pollutants (WeatherAPI uses keys like pm2_5, pm10)
         const aq = w?.current?.air_quality;
         if (aq && typeof aq === 'object') {
           if (!Number.isFinite(mapping['PM2.5']) && typeof aq.pm2_5 === 'number') { mapping['PM2.5'] = aq.pm2_5; mapping.pm25 = aq.pm2_5; }
-          if (!Number.isFinite(mapping['PM10']) && typeof aq.pm10 === 'number')   { mapping['PM10'] = aq.pm10; mapping.pm10 = aq.pm10; }
+          if (!Number.isFinite(mapping['PM10']) && typeof aq.pm10 === 'number') { mapping['PM10'] = aq.pm10; mapping.pm10 = aq.pm10; }
           if (!Number.isFinite(mapping['NO2']) && typeof aq.no2 === 'number') mapping['NO2'] = aq.no2;
           if (!Number.isFinite(mapping['SO2']) && typeof aq.so2 === 'number') mapping['SO2'] = aq.so2;
           if (!Number.isFinite(mapping['O3']) && typeof aq.o3 === 'number') mapping['O3'] = aq.o3;
           if (!Number.isFinite(mapping['CO']) && typeof aq.co === 'number') mapping['CO'] = aq.co;
-
-          // collect any AQI-like keys we find and multiply by 50 per request
-          // WeatherAPI might expose 'us-epa-index' (1..6) — we will multiply anything present
-          const possibleKeys = ['us-epa-index','gb-defra-index','us-epa_aqi','aqi','AQI','index'];
-          for (const k of possibleKeys) {
-            if (typeof aq[k] !== 'undefined' && aq[k] !== null) {
-              const raw = Number(aq[k]);
-              if (!Number.isNaN(raw)) {
-                mapping.fetchedAQI_raw = raw;
-                mapping.fetchedAQI_norm = multiplyFetchedAQI(raw); // multiply by 50 unconditionally
-                break;
-              }
-            }
-          }
-          // Also consider common numeric fields directly (rare)
-          if (typeof aq['us-epa-index'] !== 'undefined' && Number.isNaN(mapping.fetchedAQI_norm)) {
-            const raw = Number(aq['us-epa-index']);
-            if (!Number.isNaN(raw)) { mapping.fetchedAQI_raw = raw; mapping.fetchedAQI_norm = multiplyFetchedAQI(raw); }
-          }
         }
       } else debug('WeatherAPI failed status', r.status);
     }
   } catch (err) { console.warn('WeatherAPI error', err); }
 
-  // 3) OpenWeather — primarily weather; could fetch air_pollution via coords but skipped to reduce calls
+  // 3) OpenWeather
   try {
     if (OPENWEATHER_KEY) {
       const url = `https://api.openweathermap.org/data/2.5/weather?q=${encodeURIComponent(city)}&units=metric&appid=${OPENWEATHER_KEY}`;
@@ -341,23 +340,18 @@ async function fetchLiveForCity(city) {
         if (!Number.isFinite(mapping['wind_speed']) && typeof ow?.wind?.speed === 'number') mapping['wind_speed'] = ow.wind.speed;
         const precip = (ow?.rain && typeof ow.rain['1h'] === 'number') ? ow.rain['1h'] : ((ow?.snow && typeof ow.snow['1h'] === 'number') ? ow.snow['1h'] : NaN);
         if (!Number.isFinite(mapping['precipitation']) && Number.isFinite(precip)) mapping['precipitation'] = precip;
-        // OpenWeather may include main.aqi in other endpoints - if present, multiply it by 50 as well
-        if (typeof ow?.main?.aqi !== 'undefined' && !Number.isFinite(mapping.fetchedAQI_norm)) {
-          const raw = Number(ow.main.aqi);
-          if (!Number.isNaN(raw)) { mapping.fetchedAQI_raw = raw; mapping.fetchedAQI_norm = multiplyFetchedAQI(raw); }
-        }
       } else debug('OpenWeather failed status', r.status);
     }
   } catch (err) { console.warn('OpenWeather error', err); }
 
-  // 4) city static info
+  // 4) static info
   if (modelData && modelData.city_static && modelData.city_static[city]) {
     const cs = modelData.city_static[city];
     if (typeof cs.population_density !== 'undefined') mapping['population_density'] = cs.population_density;
     if (typeof cs.green_cover_percentage !== 'undefined') mapping['green_cover_percentage'] = cs.green_cover_percentage;
   }
 
-  // coerce strings to numbers
+  // coerce strings -> numbers
   for (const k of Object.keys(mapping)) {
     if (typeof mapping[k] === 'string' && mapping[k] !== '') {
       const n = Number(mapping[k]);
@@ -365,11 +359,58 @@ async function fetchLiveForCity(city) {
     }
   }
 
-  /* ---------- Final AQI decision ----------
-     1) Prefer India AQI computed from PM2.5/PM10 (µg/m3).
-     2) Else, if any fetched AQI was found, use fetchedAQI_norm (which we multiplied by 50).
-     3) Else 'Insufficient data'.
-  */
+  // gather candidates aggressively from raw blobs and mapping
+  let candidates = [];
+  candidates = candidates.concat(findNumericCandidates(openAQ_raw || {}));
+  candidates = candidates.concat(findNumericCandidates(weatherAPI_raw || {}));
+  candidates = candidates.concat(findNumericCandidates(openWeather_raw || {}));
+  // also include direct mapping keys if present
+  ['AQI','aqi','index','us-epa-index','gb-defra-index','value'].forEach(k => {
+    if (typeof mapping[k] !== 'undefined' && mapping[k] !== null && Number.isFinite(Number(mapping[k]))) {
+      candidates.push({key: 'mapping.'+k, value: Number(mapping[k])});
+    }
+  });
+
+  // dedupe and find the most likely candidate
+  const numericCandidates = candidates
+    .filter(c => typeof c.value === 'number' && Number.isFinite(c.value))
+    .map(c => ({key: c.key, value: Number(c.value)}));
+  // choose the candidate with smallest absolute value <= 10 (likely an index)
+  let chosen = null;
+  if (numericCandidates.length) {
+    // prefer keys that likely indicate AQI
+    const preferredKeys = ['us-epa-index','gb-defra-index','main.aqi','aqi','AQI','index','value'];
+    for (const pk of preferredKeys) {
+      const found = numericCandidates.find(c => c.key && String(c.key).toLowerCase().includes(pk));
+      if (found) { chosen = found; break; }
+    }
+    if (!chosen) chosen = numericCandidates[0];
+  }
+
+  // Force multiplication if chosen value looks like an index (<=10) OR is integer 1..6, else if chosen is between 0..500 treat as numeric AQI
+  let fetchedRaw = NaN, fetchedNorm = NaN;
+  if (chosen) {
+    fetchedRaw = chosen.value;
+    if (Number.isInteger(fetchedRaw) && fetchedRaw >= 1 && fetchedRaw <= 6) {
+      fetchedNorm = fetchedRaw * 50;
+    } else if (fetchedRaw >= 0 && fetchedRaw <= 10) {
+      // aggressive fallback: small numeric likely index -> multiply
+      fetchedNorm = fetchedRaw * 50;
+    } else if (fetchedRaw >= 0 && fetchedRaw <= 500) {
+      // likely already numeric AQI -> keep as-is
+      fetchedNorm = fetchedRaw;
+    } else {
+      // otherwise ignore
+      fetchedNorm = NaN;
+    }
+  }
+
+  // attach debug info
+  mapping.fetchedAQI_candidates = numericCandidates;
+  mapping.fetchedAQI_raw = Number.isFinite(fetchedRaw) ? fetchedRaw : NaN;
+  mapping.fetchedAQI_norm = Number.isFinite(fetchedNorm) ? fetchedNorm : NaN;
+
+  // final AQI decision (India preference)
   const computedAQI = computeIndiaAQIFromMapping(mapping);
   if (Number.isFinite(computedAQI)) {
     mapping['AQI'] = Math.round(computedAQI);
@@ -382,14 +423,13 @@ async function fetchLiveForCity(city) {
     mapping['AQI_category'] = 'Insufficient data';
   }
 
-  // Useful debug logging (shows whether AQI was computed or fetched and multiplied)
-  console.log('AQI debug:', {
+  console.log('AQI aggressive debug', {
     city,
-    pm25: mapping['PM2.5'],
-    pm10: mapping['PM10'],
-    computedAQI: Number.isFinite(computedAQI) ? computedAQI : null,
-    fetched_raw: mapping.fetchedAQI_raw ?? null,
-    fetched_multiplied: mapping.fetchedAQI_norm ?? null,
+    numericCandidates,
+    chosen,
+    fetchedRaw: mapping.fetchedAQI_raw,
+    fetchedNorm: mapping.fetchedAQI_norm,
+    computedAQI,
     finalAQI: mapping['AQI'],
     finalCategory: mapping['AQI_category']
   });
@@ -503,3 +543,4 @@ document.addEventListener('DOMContentLoaded', async () => {
     const apiCfg = $('apiConfig'); if (apiCfg) apiCfg.classList.toggle('hidden', modeSel.value === 'client');
   }
 });
+
