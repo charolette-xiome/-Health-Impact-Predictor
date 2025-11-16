@@ -5,6 +5,8 @@ Flask app that:
  - Exposes /model_data.json for front-end fetch('model_data.json')
  - Exposes POST /predict that accepts {"features": [...]} or {"features": {"AQI": .., ...}}, optional "k"
  - Loads model_data.json on startup and uses sklearn NearestNeighbors for KNN mean prediction
+
+Change: the output of the prediction returned by /predict is now the CEILING (integer) of the KNN mean.
 """
 
 from flask import Flask, request, jsonify, send_from_directory, abort
@@ -14,6 +16,7 @@ import json
 import logging
 import numpy as np
 from sklearn.neighbors import NearestNeighbors
+import math  # <-- added for ceiling
 
 # ---------- Configuration ----------
 STATIC_FOLDER = "static"                # folder where index.html, script.js, style.css, model_data.json live
@@ -177,7 +180,7 @@ def predict():
     OR
       { "features": { "AQI": 10, "PM2.5": 20, ... } }  # dict mapping
     Optional: "k": integer to override default k
-    Response: { "prediction": <float> } or { "error": "..." }
+    Response: { "prediction": <integer_ceiling> } or { "error": "..." }
     """
     payload = request.get_json(silent=True)
     if payload is None:
@@ -196,7 +199,9 @@ def predict():
 
     try:
         pred = knn_mean_predict_one(x_scaled, k)
-        return jsonify({"prediction": pred})
+        # Return the ceiling of the predicted number as an integer
+        pred_ceiling = int(math.ceil(pred))
+        return jsonify({"prediction": pred_ceiling})
     except Exception as e:
         logger.exception("Prediction error")
         return jsonify({"error": f"Prediction failed: {str(e)}"}), 500
