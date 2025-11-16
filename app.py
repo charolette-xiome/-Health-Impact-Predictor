@@ -41,7 +41,7 @@ CORS(app)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-# Globals
+# Globals (populated by load_model_json)
 model_md = None
 FEATURES = None
 X_train = None
@@ -68,6 +68,7 @@ def locate_model_file():
 def load_model_json():
     """Load model JSON and prepare numpy arrays and NearestNeighbors."""
     global model_md, FEATURES, X_train, y_train, scaler_mean, scaler_scale, input_fill, k_default, _nn
+
     path = locate_model_file()
     if path is None:
         logger.warning("model_data.json not found in static/ or project root")
