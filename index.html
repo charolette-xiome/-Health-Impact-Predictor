@@ -1,6 +1,5 @@
 <!doctype html>
 <html lang="en">
-
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -89,6 +88,9 @@
         height: 90px;
       }
     }
+
+    /* small helper for unit text next to keys */
+    .unit { font-size: 12px; color: rgba(107,114,128,0.9); margin-left:6px; }
   </style>
 </head>
 
@@ -200,66 +202,77 @@
         </div>
 
         <div class="live-grid" id="liveGrid" style="display:grid; grid-template-columns:repeat(2,1fr); gap:8px 18px;">
+          <!-- Weather -->
           <div class="live-row">
-            <div class="live-key" style="color:var(--muted);font-size:13px;">Temperature (°C)</div>
+            <div class="live-key" style="font-size:13px;">Temperature <span class="unit">°C</span></div>
             <div class="live-value" id="live_temperature" style="font-weight:600">—</div>
           </div>
+
           <div class="live-row">
-            <div class="live-key" style="color:var(--muted);font-size:13px;">Humidity (%)</div>
+            <div class="live-key" style="font-size:13px;">Humidity <span class="unit">%</span></div>
             <div class="live-value" id="live_humidity" style="font-weight:600">—</div>
           </div>
 
           <div class="live-row">
-            <div class="live-key" style="color:var(--muted);font-size:13px;">Wind speed (m/s)</div>
+            <div class="live-key" style="font-size:13px;">Wind speed <span class="unit">km/h</span></div>
             <div class="live-value" id="live_wind_speed" style="font-weight:600">—</div>
-          </div>
-          <div class="live-row">
-            <div class="live-key" style="color:var(--muted);font-size:13px;">Precipitation (mm, 1h)</div>
-            <div class="live-value" id="live_precipitation" style="font-weight:600">—</div>
           </div>
 
           <div class="live-row">
-            <div class="live-key" style="color:var(--muted);font-size:13px;">PM2.5 (µg/m³)</div>
+            <div class="live-key" style="font-size:13px;">Precipitation <span class="unit">mm (1h)</span></div>
+            <div class="live-value" id="live_precipitation" style="font-weight:600">—</div>
+          </div>
+
+          <!-- Pollutants -->
+          <div class="live-row">
+            <div class="live-key" style="font-size:13px;">PM2.5 <span class="unit">µg/m³</span></div>
             <div class="live-value" id="live_PM2_5" style="font-weight:600">—</div>
           </div>
+
           <div class="live-row">
-            <div class="live-key" style="color:var(--muted);font-size:13px;">PM10 (µg/m³)</div>
+            <div class="live-key" style="font-size:13px;">PM10 <span class="unit">µg/m³</span></div>
             <div class="live-value" id="live_PM10" style="font-weight:600">—</div>
           </div>
 
           <div class="live-row">
-            <div class="live-key" style="color:var(--muted);font-size:13px;">NO₂</div>
+            <div class="live-key" style="font-size:13px;">NO₂ <span class="unit">µg/m³</span></div>
             <div class="live-value" id="live_NO2" style="font-weight:600">—</div>
           </div>
+
           <div class="live-row">
-            <div class="live-key" style="color:var(--muted);font-size:13px;">SO₂</div>
+            <div class="live-key" style="font-size:13px;">SO₂ <span class="unit">µg/m³</span></div>
             <div class="live-value" id="live_SO2" style="font-weight:600">—</div>
           </div>
 
           <div class="live-row">
-            <div class="live-key" style="color:var(--muted);font-size:13px;">O₃</div>
+            <div class="live-key" style="font-size:13px;">O₃ <span class="unit">µg/m³</span></div>
             <div class="live-value" id="live_O3" style="font-weight:600">—</div>
           </div>
+
           <div class="live-row">
-            <div class="live-key" style="color:var(--muted);font-size:13px;">CO</div>
+            <div class="live-key" style="font-size:13px;">CO <span class="unit">µg/m³</span></div>
             <div class="live-value" id="live_CO" style="font-weight:600">—</div>
           </div>
 
+          <!-- AQI & meta -->
           <div class="live-row">
-            <div class="live-key" style="color:var(--muted);font-size:13px;">AQI (India / CPCB)</div>
+            <div class="live-key" style="font-size:13px;">AQI <span class="unit">(India index)</span></div>
             <div class="live-value" id="live_AQI" style="font-weight:600">—</div>
-          </div>
-          <div class="live-row">
-            <div class="live-key" style="color:var(--muted);font-size:13px;">AQI category</div>
-            <div class="live-value" id="live_AQI_category" style="font-weight:600">—</div>
           </div>
 
           <div class="live-row">
-            <div class="live-key" style="color:var(--muted);font-size:13px;">Population density</div>
+            <div class="live-key" style="font-size:13px;">AQI category</div>
+            <div class="live-value" id="live_AQI_category" style="font-weight:600">—</div>
+          </div>
+
+          <!-- Static / model info -->
+          <div class="live-row">
+            <div class="live-key" style="font-size:13px;">Population density <span class="unit">people/km²</span></div>
             <div class="live-value" id="live_population_density" style="font-weight:600">—</div>
           </div>
+
           <div class="live-row">
-            <div class="live-key" style="color:var(--muted);font-size:13px;">Green cover %</div>
+            <div class="live-key" style="font-size:13px;">Green cover <span class="unit">%</span></div>
             <div class="live-value" id="live_green_cover_percentage" style="font-weight:600">—</div>
           </div>
         </div>
