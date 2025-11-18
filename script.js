@@ -1,9 +1,10 @@
-/* script.js — full replacement
-   - Fetch priority: OpenAQ -> WeatherAPI -> OpenWeather
-   - Multiply any fetched AQI by 50 (as requested), then use India AQI computed
-     from PM2.5/PM10 (preferred). If no PMs, fallback to multiplied AQI.
-   - Units kept: PM µg/m3, temp °C, wind m/s, precip mm, humidity %.
-   - Client KNN prediction and server-mode preserved.
+/* script.js — full replacement (updated per your tasks)
+   - Top 30 + Samastipur & Panipat
+   - Chips search, select all, keyboard accessible chips
+   - Concurrency-limited fetches with polite batching
+   - Small UI animations (cards & chips) using Web Animations API
+   - Retains original AQI logic (multiply index-by-50, India preference)
+   - Client KNN prediction & server API preserved
 */
 
 /* ---------- Config (consider moving keys to backend) ---------- */
@@ -12,24 +13,66 @@ const OPENAQ_BASE = 'https://api.openaq.org/v2/latest';
 const WEATHERAPI_KEY = 'a16e02bb1b734caba0895738251611';
 
 const DEFAULT_FEATURES = [
-  'AQI','PM2.5','PM10','NO2','SO2','CO','O3',
-  'temperature','humidity','wind_speed','precipitation',
-  'population_density','green_cover_percentage'
+  'AQI', 'PM2.5', 'PM10', 'NO2', 'SO2', 'CO', 'O3',
+  'temperature', 'humidity', 'wind_speed', 'precipitation',
+  'population_density', 'green_cover_percentage'
 ];
 
-const CITIES = ['Delhi','Mumbai','Chennai','Kolkata','Patna'];
+/* ---------- TASK 1: expanded cities list (32 cities) ----------
+   Top 30 most-populous Indian cities (typical lists) + Samastipur & Panipat
+*/
+const CITIES = [
+  "Mumbai",
+  "Delhi",
+  "Bengaluru",
+  "Hyderabad",
+  "Ahmedabad",
+  "Chennai",
+  "Kolkata",
+  "Surat",
+  "Pune",
+  "Jaipur",
+  "Lucknow",
+  "Kanpur",
+  "Nagpur",
+  "Indore",
+  "Thane",
+  "Bhopal",
+  "Visakhapatnam",
+  "Pimpri-Chinchwad",
+  "Patna",
+  "Vadodara",
+  "Ghaziabad",
+  "Ludhiana",
+  "Agra",
+  "Nashik",
+  "Faridabad",
+  "Meerut",
+  "Rajkot",
+  "Kalyan-Dombivli",
+  "Vasai-Virar",
+  "Varanasi",
+  "Samastipur",
+  "Panipat"
+];
 
 let modelData = null;
 let FEATURES = DEFAULT_FEATURES.slice();
 let sanitizedFeatureIds = {};
 
+/* ---------- small runtime config for fetch politeness / animations ---------- */
+const CONCURRENT_FETCHES = 4;   // number of parallel city fetches
+const BATCH_DELAY_MS = 350;    // pause between batches to avoid burst rate-limits
+const CARD_ANIM_OPTS = { duration: 420, easing: 'cubic-bezier(.2,.9,.2,1)', fill: 'both' };
+
 /* ---------- DOM helpers ---------- */
 const $ = id => document.getElementById(id);
-function el(tag, props={}, children=[]) {
+function el(tag, props = {}, children = []) {
   const e = document.createElement(tag);
   for (const k in props) {
     if (k === 'class') e.className = props[k];
     else if (k === 'text') e.textContent = props[k];
+    else if (k === 'html') e.innerHTML = props[k];
     else e.setAttribute(k, props[k]);
   }
   (Array.isArray(children) ? children : [children]).forEach(c => {
@@ -41,48 +84,96 @@ function el(tag, props={}, children=[]) {
 function idForFeature(feature) { return feature.replace(/[^a-z0-9]+/gi, '_'); }
 function buildSanitizedMap() { sanitizedFeatureIds = {}; for (const f of FEATURES) sanitizedFeatureIds[f] = idForFeature(f); }
 
-/* ---------- UI: chips/cards ---------- */
+/* ---------- CHIPS UI: searchable, accessible, select-all ---------- */
+/* Replace the existing renderChips() with this */
 function renderChips() {
   const container = $('cityChips');
   if (!container) return;
   container.innerHTML = '';
+
+  // search + actions row
+  const ctrl = el('div', {class:'chip-controls', style: 'display:flex; gap:8px; align-items:center; margin-bottom:8px; flex-wrap:wrap;'});
+  const search = el('input', {type:'search', placeholder:'Search cities...', id:'citySearch', style:'padding:8px 10px; border-radius:8px; border:1px solid #e6eefb; min-width:180px;'});
+  const selectAllBtn = el('button', {class:'', text:'Select all'});
+  const clearAllBtn = el('button', {text:'Clear selection'});
+  selectAllBtn.addEventListener('click', ()=> { for (const c of container.querySelectorAll('.chip')) c.classList.add('selected'), c.setAttribute('aria-pressed','true'); });
+  clearAllBtn.addEventListener('click', ()=> { for (const c of container.querySelectorAll('.chip')) c.classList.remove('selected'), c.setAttribute('aria-pressed','false'); });
+  ctrl.append(search, selectAllBtn, clearAllBtn);
+  container.appendChild(ctrl);
+
+  // chips wrapper (scroll/wrap)
+  const chipsRow = el('div', {style:'display:flex; gap:8px; flex-wrap:wrap; align-items:center;', id:'_chips_row'});
+  container.appendChild(chipsRow);
+
+  // create chips (initially UNSELECTED)
   for (const city of CITIES) {
-    const chip = el('div', {class:'chip selected', 'data-city': city}, city);
-    chip.addEventListener('click', () => chip.classList.toggle('selected'));
-    container.appendChild(chip);
+    // NOTE: do NOT give 'selected' class here so chips start unselected
+    const chip = el('button', {class:'chip', 'data-city': city, 'aria-pressed':'false', 'type':'button', title:city}, city);
+    chip.style.cursor = 'pointer';
+    chip.addEventListener('click', () => {
+      chip.classList.toggle('selected');
+      chip.setAttribute('aria-pressed', chip.classList.contains('selected') ? 'true' : 'false');
+    });
+    chipsRow.appendChild(chip);
+    // gentle entrance animation (non-critical)
+    try {
+      chip.animate([{opacity:0, transform:'translateY(6px)'}, {opacity:1, transform:'translateY(0)'}], {duration:300, easing:'ease-out', fill:'both'});
+    } catch(e){}
   }
+
+  // search filter behavior
+  search.addEventListener('input', (e) => {
+    const q = (e.target.value || '').trim().toLowerCase();
+    const chips = chipsRow.querySelectorAll('.chip');
+    chips.forEach(c => {
+      const text = (c.textContent || '').toLowerCase();
+      c.style.display = (!q || text.includes(q)) ? '' : 'none';
+    });
+  });
 }
+
+
+/* return selected city names (as array) */
 function selectedCities() {
   return Array.from(document.querySelectorAll('.chip.selected')).map(c => c.dataset.city);
 }
-function makeCardForCity(city, options={}) {
+
+/* ---------- Card creation, edit lock, small animations ---------- */
+function makeCardForCity(city, options = {}) {
   const editable = !!options.editableByDefault;
-  const card = el('div', {class:'card', id:`card_${city}`});
-  card.appendChild(el('h3', {text: city}));
-  const fieldsGrid = el('div', {class:'fields-grid'});
+  const card = el('div', { class: 'card', id: `card_${city}`, role: 'group', 'aria-label': city });
+  card.appendChild(el('h3', { text: city }));
+  const fieldsGrid = el('div', { class: 'fields-grid' });
   for (const f of FEATURES) {
     const fid = `${city}__${sanitizedFeatureIds[f]}`;
-    const field = el('div', {class:'field'});
-    field.appendChild(el('label', {text: f}));
-    const input = el('input', {type:'number', id:fid, placeholder:'', step:'any'});
+    const field = el('div', { class: 'field' });
+    field.appendChild(el('label', { text: f }));
+    const input = el('input', { type: 'number', id: fid, placeholder: '', step: 'any', 'aria-label': `${city} ${f}` });
     input.readOnly = !editable;
     input.addEventListener('dblclick', () => input.value = '');
     field.appendChild(input);
     fieldsGrid.appendChild(field);
   }
   card.appendChild(fieldsGrid);
-  const actions = el('div', {class:'card-actions'});
-  const predictBtn = el('button', {class:'primary', text:'Predict'});
-  const editBtn = el('button', {text: editable ? 'Lock inputs' : 'Unlock inputs'});
-  const meta = el('div', {class:'small-muted', id:`meta_${city}`});
+
+  const actions = el('div', { class: 'card-actions' });
+  const predictBtn = el('button', { class: 'primary', text: 'Predict' });
+  const editBtn = el('button', { text: editable ? 'Lock inputs' : 'Unlock inputs' });
+  const meta = el('div', { class: 'small-muted', id: `meta_${city}` });
   predictBtn.addEventListener('click', () => predictForCity(city));
   editBtn.addEventListener('click', () => toggleCardInputs(city, editBtn));
   actions.append(predictBtn, editBtn, meta);
   card.append(actions);
-  card.append(el('div', {class:'result-box', id:`result_${city}`, text:'No prediction yet'}));
+  card.append(el('div', { class: 'result-box', id: `result_${city}`, text: 'No prediction yet' }));
+
+  // subtle entrance animation
+  try {
+    card.animate([{ opacity: 0, transform: 'translateY(10px) scale(.995)' }, { opacity: 1, transform: 'translateY(0) scale(1)' }], CARD_ANIM_OPTS);
+  } catch (e) { }
+
   return card;
 }
-function toggleCardInputs(city, buttonEl=null) {
+function toggleCardInputs(city, buttonEl = null) {
   const inputs = Array.from(document.querySelectorAll(`#card_${city} input`));
   if (!inputs.length) return;
   const anyReadOnly = inputs.some(i => i.readOnly);
@@ -91,10 +182,10 @@ function toggleCardInputs(city, buttonEl=null) {
   if (buttonEl) buttonEl.textContent = lockAll ? 'Unlock inputs' : 'Lock inputs';
 }
 
-/* ---------- Model loader & client KNN ---------- */
+/* ---------- Model loader & client KNN (unchanged core logic) ---------- */
 async function loadModelData() {
   try {
-    const r = await fetch('model_data.json', {cache:'no-cache'});
+    const r = await fetch('model_data.json', { cache: 'no-cache' });
     if (!r.ok) { modelData = null; console.warn('model_data.json not found'); return false; }
     const j = await r.json();
     modelData = j;
@@ -109,36 +200,36 @@ async function loadModelData() {
   }
 }
 
-function euclidean(a,b) {
-  let s=0;
-  for (let i=0;i<a.length;i++){ const da=a[i], db=b[i]; const d=(da-db)||0; s+=d*d; }
+function euclidean(a, b) {
+  let s = 0;
+  for (let i = 0; i < a.length; i++) { const da = a[i], db = b[i]; const d = (da - db) || 0; s += d * d; }
   return Math.sqrt(s);
 }
-function knnPredictSingle(x_query,k) {
+function knnPredictSingle(x_query, k) {
   if (!modelData || !Array.isArray(modelData.X_train) || !Array.isArray(modelData.y_train)) throw new Error('Client model incomplete');
   const X = modelData.X_train; const y = modelData.y_train;
-  const arr = X.map((row,i)=>({d:euclidean(x_query,row), idx:i}));
-  arr.sort((a,b)=>a.d-b.d);
+  const arr = X.map((row, i) => ({ d: euclidean(x_query, row), idx: i }));
+  arr.sort((a, b) => a.d - b.d);
   const top = arr.slice(0, Math.min(k, X.length));
-  let sum=0; for (const t of top) sum+=y[t.idx];
-  return sum/top.length;
+  let sum = 0; for (const t of top) sum += y[t.idx];
+  return sum / top.length;
 }
 function computeColumnMeans() {
-  if (!modelData || !Array.isArray(modelData.X_train) || modelData.X_train.length===0) return null;
+  if (!modelData || !Array.isArray(modelData.X_train) || modelData.X_train.length === 0) return null;
   const D = modelData.X_train[0].length; const means = new Array(D).fill(0);
-  for (let j=0;j<D;j++){ let s=0,c=0; for (let i=0;i<modelData.X_train.length;i++){ const v=modelData.X_train[i][j]; if (!Number.isNaN(v)){ s+=v; c++; } } means[j] = c>0 ? s/c : 0; }
+  for (let j = 0; j < D; j++) { let s = 0, c = 0; for (let i = 0; i < modelData.X_train.length; i++) { const v = modelData.X_train[i][j]; if (!Number.isNaN(v)) { s += v; c++; } } means[j] = c > 0 ? s / c : 0; }
   return means;
 }
 function prepareClientInput(raw) {
-  const D = raw.length; let x = raw.slice(0,D);
+  const D = raw.length; let x = raw.slice(0, D);
   if (modelData && Array.isArray(modelData.input_fill)) {
-    for (let i=0;i<D;i++) if (Number.isNaN(x[i])) { const v=modelData.input_fill[i]; x[i] = (typeof v==='number' && !Number.isNaN(v)) ? v : NaN; }
+    for (let i = 0; i < D; i++) if (Number.isNaN(x[i])) { const v = modelData.input_fill[i]; x[i] = (typeof v === 'number' && !Number.isNaN(v)) ? v : NaN; }
   }
   const means = computeColumnMeans();
-  if (means) for (let i=0;i<D;i++) if (Number.isNaN(x[i])) x[i]=means[i];
-  x = x.map(v => Number.isFinite(v)?v:0);
+  if (means) for (let i = 0; i < D; i++) if (Number.isNaN(x[i])) x[i] = means[i];
+  x = x.map(v => Number.isFinite(v) ? v : 0);
   if (modelData && Array.isArray(modelData.scaler_mean) && Array.isArray(modelData.scaler_scale)) {
-    x = x.map((v,i) => { const mu = modelData.scaler_mean[i] ?? 0; const sc = (modelData.scaler_scale[i]===0?1e-6:(modelData.scaler_scale[i] ?? 1)); return (v-mu)/sc; });
+    x = x.map((v, i) => { const mu = modelData.scaler_mean[i] ?? 0; const sc = (modelData.scaler_scale[i] === 0 ? 1e-6 : (modelData.scaler_scale[i] ?? 1)); return (v - mu) / sc; });
   }
   return x;
 }
@@ -147,40 +238,40 @@ function prepareClientInput(raw) {
 async function predictForCity(city) {
   const mode = $('modeSelect') ? $('modeSelect').value : 'client';
   const apiUrl = $('apiUrl') ? $('apiUrl').value.trim() : '';
-  const raw = FEATURES.map(f => { const id=`${city}__${sanitizedFeatureIds[f]}`; const inp=document.getElementById(id); if (!inp) return NaN; const v=inp.value; return v===''?NaN:Number(v); });
+  const raw = FEATURES.map(f => { const id = `${city}__${sanitizedFeatureIds[f]}`; const inp = document.getElementById(id); if (!inp) return NaN; const v = inp.value; return v === '' ? NaN : Number(v); });
 
+  const resultEl = $(`result_${city}`);
   if (mode === 'client') {
-    if (!modelData) { $(`result_${city}`).textContent='No client model loaded'; return; }
-    if (!Array.isArray(modelData.X_train) || !Array.isArray(modelData.y_train)) { $(`result_${city}`).textContent='Client model incomplete'; return; }
+    if (!modelData) { if (resultEl) resultEl.textContent = 'No client model loaded'; return; }
+    if (!Array.isArray(modelData.X_train) || !Array.isArray(modelData.y_train)) { if (resultEl) resultEl.textContent = 'Client model incomplete'; return; }
     try {
       const prepared = prepareClientInput(raw);
       const k = modelData.k || 5;
       const pred = knnPredictSingle(prepared, Math.min(k, modelData.X_train.length));
-      $(`result_${city}`).textContent = Number.isFinite(pred) ? pred.toFixed(3) : String(pred);
-      $(`meta_${city}`).textContent = `client KNN (k=${k}, n_train=${modelData.X_train.length})`;
+      if (resultEl) resultEl.textContent = Number.isFinite(pred) ? pred.toFixed(3) : String(pred);
+      const meta = $(`meta_${city}`); if (meta) meta.textContent = `client KNN (k=${k}, n_train=${modelData.X_train.length})`;
     } catch (err) {
-      console.error(err); $(`result_${city}`).textContent = 'Client prediction error: ' + (err.message || err);
+      console.error(err); if (resultEl) resultEl.textContent = 'Client prediction error: ' + (err.message || err);
     }
   } else {
-    if (!apiUrl) { $(`result_${city}`).textContent = 'Set API URL in config'; return; }
+    if (!apiUrl) { if (resultEl) resultEl.textContent = 'Set API URL in config'; return; }
     try {
-      $(`result_${city}`).textContent = 'Predicting...';
-      const resp = await fetch(apiUrl, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({features: raw, city})});
-      if (!resp.ok) { const txt=await resp.text(); throw new Error(txt||`API error ${resp.status}`); }
+      if (resultEl) resultEl.textContent = 'Predicting...';
+      const resp = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ features: raw, city }) });
+      if (!resp.ok) { const txt = await resp.text(); throw new Error(txt || `API error ${resp.status}`); }
       const j = await resp.json();
-      // server returns either "prediction" (ceiling int) or "prediction_raw"/"prediction"
       const val = (typeof j.prediction !== 'undefined') ? j.prediction : (typeof j.prediction_raw !== 'undefined' ? j.prediction_raw : undefined);
       if (typeof val === 'undefined') throw new Error('API response missing prediction');
-      $(`result_${city}`).textContent = Number.isFinite(Number(val)) ? Number(val).toFixed(3) : String(val);
-      $(`meta_${city}`).textContent = 'via API';
+      if (resultEl) resultEl.textContent = Number.isFinite(Number(val)) ? Number(val).toFixed(3) : String(val);
+      const meta = $(`meta_${city}`); if (meta) meta.textContent = 'via API';
     } catch (err) {
-      console.error(err); $(`result_${city}`).textContent = 'API error: ' + (err.message || err);
+      console.error(err); if (resultEl) resultEl.textContent = 'API error: ' + (err.message || err);
     }
   }
 }
 
-/* ---------- AQI helpers (India/CPCB) ---------- */
-function clamp(n, a, b){ return Math.min(Math.max(n,a),b); }
+/* ---------- AQI helpers (India/CPCB) (unchanged, preserved) ---------- */
+function clamp(n, a, b) { return Math.min(Math.max(n, a), b); }
 function subIndexFromRange(C, C_low, C_high, I_low, I_high) {
   if (!Number.isFinite(C)) return NaN;
   const Cc = clamp(C, C_low, C_high);
@@ -188,32 +279,32 @@ function subIndexFromRange(C, C_low, C_high, I_low, I_high) {
   return Math.round(aqi);
 }
 const IND_PM25_BREAKPOINTS = [
-  {c_low: 0.0,   c_high: 30.0,  i_low: 0,   i_high: 50},
-  {c_low: 30.1,  c_high: 60.0,  i_low: 51,  i_high: 100},
-  {c_low: 60.1,  c_high: 90.0,  i_low: 101, i_high: 200},
-  {c_low: 90.1,  c_high: 120.0, i_low: 201, i_high: 300},
-  {c_low: 120.1, c_high: 250.0, i_low: 301, i_high: 400},
-  {c_low: 250.1, c_high: 350.0, i_low: 401, i_high: 450},
-  {c_low: 350.1, c_high: 500.0, i_low: 451, i_high: 500}
+  { c_low: 0.0, c_high: 30.0, i_low: 0, i_high: 50 },
+  { c_low: 30.1, c_high: 60.0, i_low: 51, i_high: 100 },
+  { c_low: 60.1, c_high: 90.0, i_low: 101, i_high: 200 },
+  { c_low: 90.1, c_high: 120.0, i_low: 201, i_high: 300 },
+  { c_low: 120.1, c_high: 250.0, i_low: 301, i_high: 400 },
+  { c_low: 250.1, c_high: 350.0, i_low: 401, i_high: 450 },
+  { c_low: 350.1, c_high: 500.0, i_low: 451, i_high: 500 }
 ];
 const IND_PM10_BREAKPOINTS = [
-  {c_low: 0.0,   c_high: 50.0,  i_low: 0,   i_high: 50},
-  {c_low: 50.1,  c_high: 100.0, i_low: 51,  i_high: 100},
-  {c_low: 100.1, c_high: 250.0, i_low: 101, i_high: 200},
-  {c_low: 250.1, c_high: 350.0, i_low: 201, i_high: 300},
-  {c_low: 350.1, c_high: 430.0, i_low: 301, i_high: 400},
-  {c_low: 430.1, c_high: 500.0, i_low: 401, i_high: 500}
+  { c_low: 0.0, c_high: 50.0, i_low: 0, i_high: 50 },
+  { c_low: 50.1, c_high: 100.0, i_low: 51, i_high: 100 },
+  { c_low: 100.1, c_high: 250.0, i_low: 101, i_high: 200 },
+  { c_low: 250.1, c_high: 350.0, i_low: 201, i_high: 300 },
+  { c_low: 350.1, c_high: 430.0, i_low: 301, i_high: 400 },
+  { c_low: 430.1, c_high: 500.0, i_low: 401, i_high: 500 }
 ];
 function subIndexForPM25(c) {
   if (!Number.isFinite(c)) return NaN;
-  for (const bp of IND_PM25_BREAKPOINTS) if (c >= bp.c_low && c <= bp.c_high) return subIndexFromRange(c, bp.c_low,bp.c_high,bp.i_low,bp.i_high);
-  if (c > IND_PM25_BREAKPOINTS[IND_PM25_BREAKPOINTS.length-1].c_high) return IND_PM25_BREAKPOINTS[IND_PM25_BREAKPOINTS.length-1].i_high;
+  for (const bp of IND_PM25_BREAKPOINTS) if (c >= bp.c_low && c <= bp.c_high) return subIndexFromRange(c, bp.c_low, bp.c_high, bp.i_low, bp.i_high);
+  if (c > IND_PM25_BREAKPOINTS[IND_PM25_BREAKPOINTS.length - 1].c_high) return IND_PM25_BREAKPOINTS[IND_PM25_BREAKPOINTS.length - 1].i_high;
   return NaN;
 }
 function subIndexForPM10(c) {
   if (!Number.isFinite(c)) return NaN;
-  for (const bp of IND_PM10_BREAKPOINTS) if (c >= bp.c_low && c <= bp.c_high) return subIndexFromRange(c, bp.c_low,bp.c_high,bp.i_low,bp.i_high);
-  if (c > IND_PM10_BREAKPOINTS[IND_PM10_BREAKPOINTS.length-1].c_high) return IND_PM10_BREAKPOINTS[IND_PM10_BREAKPOINTS.length-1].i_high;
+  for (const bp of IND_PM10_BREAKPOINTS) if (c >= bp.c_low && c <= bp.c_high) return subIndexFromRange(c, bp.c_low, bp.c_high, bp.i_low, bp.i_high);
+  if (c > IND_PM10_BREAKPOINTS[IND_PM10_BREAKPOINTS.length - 1].c_high) return IND_PM10_BREAKPOINTS[IND_PM10_BREAKPOINTS.length - 1].i_high;
   return NaN;
 }
 function indiaAQICategory(aqi) {
@@ -225,7 +316,7 @@ function indiaAQICategory(aqi) {
   if (aqi <= 400) return 'Very Poor';
   return 'Severe';
 }
-function computeIndiaAQIFromMapping(mapping){
+function computeIndiaAQIFromMapping(mapping) {
   const pm25 = Number.isFinite(mapping['PM2.5']) ? mapping['PM2.5'] : (Number.isFinite(mapping.pm25) ? mapping.pm25 : NaN);
   const pm10 = Number.isFinite(mapping['PM10']) ? mapping['PM10'] : (Number.isFinite(mapping.pm10) ? mapping.pm10 : NaN);
   const a25 = Number.isFinite(pm25) ? subIndexForPM25(pm25) : NaN;
@@ -237,10 +328,7 @@ function computeIndiaAQIFromMapping(mapping){
   return Math.max(...arr);
 }
 
-/* ---------- NEW: aggressive multiply-any-AQI-by-50 behavior ----------
-   As you requested: any fetched AQI value (if found) will be multiplied by 50.
-   We still prefer India AQI computed from PMs; multiplied AQI is fallback.
-*/
+/* ---------- NEW: aggressive multiply-any-AQI-by-50 behavior ---------- */
 function multiplyFetchedAQI(raw) {
   if (raw === null || typeof raw === 'undefined') return NaN;
   const n = Number(raw);
@@ -248,27 +336,27 @@ function multiplyFetchedAQI(raw) {
   return n * 50;
 }
 
-/* Replace your current fetchLiveForCity with this aggressive-detection version */
+/* ---------- fetchLiveForCity (main data assembly) ----------
+   This version is the same logic you had earlier but left in place. It returns a mapping of FEATURES -> numeric values.
+*/
 async function fetchLiveForCity(city) {
-  const mapping = {}; FEATURES.forEach(f => mapping[f]=NaN);
-  const debug = (label,obj) => { try { console.log(label, obj); } catch(e) {} };
+  const mapping = {}; FEATURES.forEach(f => mapping[f] = NaN);
+  const debug = (label, obj) => { try { console.log(label, obj); } catch (e) { } };
 
   // raw responses
   let openAQ_raw = null, weatherAPI_raw = null, openWeather_raw = null;
 
-  // helper: shallow-scan object for numeric values that look like AQI indices
+  // helper: shallow-scan object for numeric values
   function findNumericCandidates(obj) {
     const out = [];
     if (!obj || typeof obj !== 'object') return out;
-    // shallow keys
     for (const k of Object.keys(obj)) {
       const v = obj[k];
-      if (typeof v === 'number' && Number.isFinite(v)) out.push({key:k, value:v, path:'root'});
-      // small nested objects we check a level deeper automatically
+      if (typeof v === 'number' && Number.isFinite(v)) out.push({ key: k, value: v, path: 'root' });
       if (v && typeof v === 'object') {
         for (const kk of Object.keys(v)) {
           const vv = v[kk];
-          if (typeof vv === 'number' && Number.isFinite(vv)) out.push({key:k + '.' + kk, value: vv, path: 'nested'});
+          if (typeof vv === 'number' && Number.isFinite(vv)) out.push({ key: k + '.' + kk, value: vv, path: 'nested' });
         }
       }
     }
@@ -283,12 +371,14 @@ async function fetchLiveForCity(city) {
       openAQ_raw = await r.json();
       debug('OpenAQ raw', openAQ_raw);
       const measures = {};
-      openAQ_raw.results?.forEach(loc => { loc.measurements?.forEach(m => {
-        const key = (m.parameter || '').toLowerCase();
-        if (!measures[key]) measures[key]=[];
-        if (typeof m.value === 'number') measures[key].push(m.value);
-      }); });
-      const avg = key => (measures[key] && measures[key].length) ? measures[key].reduce((a,b)=>a+b,0)/measures[key].length : NaN;
+      openAQ_raw.results?.forEach(loc => {
+        loc.measurements?.forEach(m => {
+          const key = (m.parameter || '').toLowerCase();
+          if (!measures[key]) measures[key] = [];
+          if (typeof m.value === 'number') measures[key].push(m.value);
+        });
+      });
+      const avg = key => (measures[key] && measures[key].length) ? measures[key].reduce((a, b) => a + b, 0) / measures[key].length : NaN;
       const pm25 = avg('pm25') || avg('pm2.5') || avg('pm_2_5') || NaN;
       const pm10 = avg('pm10') || avg('pm_10') || NaN;
       if (Number.isFinite(pm25)) { mapping['PM2.5'] = pm25; mapping.pm25 = pm25; }
@@ -344,7 +434,7 @@ async function fetchLiveForCity(city) {
     }
   } catch (err) { console.warn('OpenWeather error', err); }
 
-  // 4) static info
+  // 4) static info (modelData.city_static)
   if (modelData && modelData.city_static && modelData.city_static[city]) {
     const cs = modelData.city_static[city];
     if (typeof cs.population_density !== 'undefined') mapping['population_density'] = cs.population_density;
@@ -359,27 +449,25 @@ async function fetchLiveForCity(city) {
     }
   }
 
-  // gather candidates aggressively from raw blobs and mapping
+  // gather numeric candidates from raw blobs and mapping
   let candidates = [];
   candidates = candidates.concat(findNumericCandidates(openAQ_raw || {}));
   candidates = candidates.concat(findNumericCandidates(weatherAPI_raw || {}));
   candidates = candidates.concat(findNumericCandidates(openWeather_raw || {}));
-  // also include direct mapping keys if present
-  ['AQI','aqi','index','us-epa-index','gb-defra-index','value'].forEach(k => {
+  ['AQI', 'aqi', 'index', 'us-epa-index', 'gb-defra-index', 'value'].forEach(k => {
     if (typeof mapping[k] !== 'undefined' && mapping[k] !== null && Number.isFinite(Number(mapping[k]))) {
-      candidates.push({key: 'mapping.'+k, value: Number(mapping[k])});
+      candidates.push({ key: 'mapping.' + k, value: Number(mapping[k]) });
     }
   });
 
-  // dedupe and find the most likely candidate
   const numericCandidates = candidates
     .filter(c => typeof c.value === 'number' && Number.isFinite(c.value))
-    .map(c => ({key: c.key, value: Number(c.value)}));
-  // choose the candidate with smallest absolute value <= 10 (likely an index)
+    .map(c => ({ key: c.key, value: Number(c.value) }));
+
+  // choose likely AQI candidate
   let chosen = null;
   if (numericCandidates.length) {
-    // prefer keys that likely indicate AQI
-    const preferredKeys = ['us-epa-index','gb-defra-index','main.aqi','aqi','AQI','index','value'];
+    const preferredKeys = ['us-epa-index', 'gb-defra-index', 'main.aqi', 'aqi', 'AQI', 'index', 'value'];
     for (const pk of preferredKeys) {
       const found = numericCandidates.find(c => c.key && String(c.key).toLowerCase().includes(pk));
       if (found) { chosen = found; break; }
@@ -387,30 +475,26 @@ async function fetchLiveForCity(city) {
     if (!chosen) chosen = numericCandidates[0];
   }
 
-  // Force multiplication if chosen value looks like an index (<=10) OR is integer 1..6, else if chosen is between 0..500 treat as numeric AQI
+  // force multiplication logic if candidate looks like index (<=10) or 1..6 integer
   let fetchedRaw = NaN, fetchedNorm = NaN;
   if (chosen) {
     fetchedRaw = chosen.value;
     if (Number.isInteger(fetchedRaw) && fetchedRaw >= 1 && fetchedRaw <= 6) {
       fetchedNorm = fetchedRaw * 50;
     } else if (fetchedRaw >= 0 && fetchedRaw <= 10) {
-      // aggressive fallback: small numeric likely index -> multiply
       fetchedNorm = fetchedRaw * 50;
     } else if (fetchedRaw >= 0 && fetchedRaw <= 500) {
-      // likely already numeric AQI -> keep as-is
       fetchedNorm = fetchedRaw;
     } else {
-      // otherwise ignore
       fetchedNorm = NaN;
     }
   }
 
-  // attach debug info
   mapping.fetchedAQI_candidates = numericCandidates;
   mapping.fetchedAQI_raw = Number.isFinite(fetchedRaw) ? fetchedRaw : NaN;
   mapping.fetchedAQI_norm = Number.isFinite(fetchedNorm) ? fetchedNorm : NaN;
 
-  // final AQI decision (India preference)
+  // final AQI decision (prefer India PM-based)
   const computedAQI = computeIndiaAQIFromMapping(mapping);
   if (Number.isFinite(computedAQI)) {
     mapping['AQI'] = Math.round(computedAQI);
@@ -423,7 +507,7 @@ async function fetchLiveForCity(city) {
     mapping['AQI_category'] = 'Insufficient data';
   }
 
-  console.log('AQI aggressive debug', {
+  debug('AQI aggressive debug', {
     city,
     numericCandidates,
     chosen,
@@ -437,7 +521,7 @@ async function fetchLiveForCity(city) {
   return mapping;
 }
 
-/* ---------- Live panel helpers ---------- */
+/* ---------- Live panel helpers (unchanged behavior) ---------- */
 function showLivePanel() {
   const cities = selectedCities();
   if (!cities.length) return alert('Select at least one city (click chips) to show live data for.');
@@ -450,7 +534,7 @@ function showLivePanel() {
 async function updateLivePanel(city) {
   try {
     const mapping = await fetchLiveForCity(city);
-    const setText = (id, v, int=false) => { const el = $(id); if (!el) return; if (typeof v === 'number' && Number.isFinite(v)) el.textContent = int ? String(Math.round(v)) : v.toFixed(3); else el.textContent = (v === null || typeof v === 'undefined' || Number.isNaN(v)) ? '—' : String(v); };
+    const setText = (id, v, int = false) => { const el = $(id); if (!el) return; if (typeof v === 'number' && Number.isFinite(v)) el.textContent = int ? String(Math.round(v)) : v.toFixed(3); else el.textContent = (v === null || typeof v === 'undefined' || Number.isNaN(v)) ? '—' : String(v); };
     setText('live_temperature', mapping['temperature']);
     setText('live_humidity', mapping['humidity'], true);
     setText('live_wind_speed', mapping['wind_speed']);
@@ -477,70 +561,128 @@ let _autoRefreshTimer = null;
 function startAutoRefresh(city) {
   stopAutoRefresh();
   const sec = Math.max(10, Number($('refreshInterval').value || 60));
-  _autoRefreshTimer = setInterval(() => updateLivePanel(city), sec*1000);
+  _autoRefreshTimer = setInterval(() => updateLivePanel(city), sec * 1000);
 }
 function stopAutoRefresh() { if (_autoRefreshTimer) { clearInterval(_autoRefreshTimer); _autoRefreshTimer = null; } }
 
+/* ---------- helper: limited concurrency mapper ----------
+   maps fn over items using at most N parallel promises
+*/
+async function pMapLimit(list, fn, limit = 4, delayBetweenBatches = 200) {
+  const out = [];
+  let i = 0;
+  async function worker() {
+    while (i < list.length) {
+      const idx = i++;
+      try {
+        const res = await fn(list[idx], idx);
+        out[idx] = { ok: true, value: res };
+      } catch (err) {
+        out[idx] = { ok: false, error: err };
+      }
+      // optional small delay to reduce bursting
+      if (delayBetweenBatches) await new Promise(r => setTimeout(r, delayBetweenBatches));
+    }
+  }
+  const workers = new Array(Math.min(limit, list.length)).fill(0).map(() => worker());
+  await Promise.all(workers);
+  return out;
+}
+
+/* ---------- fetch and predict for many cities (polite & animated) ---------- */
 async function fetchLiveForSelectedCities() {
   const cities = selectedCities();
   if (!cities.length) return alert('Select at least one city');
   $('cardsContainer').innerHTML = '';
   const editable = $('editableByDefault') ? $('editableByDefault').checked : false;
-  for (const city of cities) $('cardsContainer').append(makeCardForCity(city,{editableByDefault: editable}));
-  await loadModelData();
+  // create empty cards first (fast UI response)
   for (const city of cities) {
-    try {
-      const mapping = await fetchLiveForCity(city);
-      for (const f of FEATURES) {
-        const id = `${city}__${sanitizedFeatureIds[f]}`;
-        const inp = document.getElementById(id);
-        if (!inp) continue;
-        const v = mapping[f];
-        if (f === 'AQI') { inp.value = (Number.isFinite(v) ? String(Math.round(v)) : ''); }
-        else inp.value = (typeof v === 'number' && Number.isFinite(v)) ? Number(v).toFixed(3) : '';
-      }
-      await predictForCity(city);
-    } catch (err) {
-      console.warn('Fetch/predict error for', city, err);
-      const r = $(`result_${city}`); if (r) r.textContent = 'Fetch/predict error';
-    }
+    const card = makeCardForCity(city, { editableByDefault: editable });
+    $('cardsContainer').appendChild(card);
   }
+
+  // ensure model loaded once
+  await loadModelData();
+
+  // fetch using concurrency-limited mapper
+  const results = await pMapLimit(cities, async (city) => {
+    // update meta so user knows we're fetching
+    const meta = $(`meta_${city}`); if (meta) meta.textContent = 'fetching...';
+    const mapping = await fetchLiveForCity(city);
+    // populate inputs
+    for (const f of FEATURES) {
+      const id = `${city}__${sanitizedFeatureIds[f]}`;
+      const inp = document.getElementById(id);
+      if (!inp) continue;
+      const v = mapping[f];
+      if (f === 'AQI') { inp.value = (Number.isFinite(v) ? String(Math.round(v)) : ''); }
+      else inp.value = (typeof v === 'number' && Number.isFinite(v)) ? Number(v).toFixed(3) : '';
+    }
+    // set meta and run prediction (client or API) and return success
+    try {
+      await predictForCity(city);
+      const meta2 = $(`meta_${city}`); if (meta2) meta2.textContent = 'fetched & predicted';
+    } catch (e) {
+      const meta2 = $(`meta_${city}`); if (meta2) meta2.textContent = 'fetched (predict error)';
+    }
+    return { city, ok: true };
+  }, CONCURRENT_FETCHES, BATCH_DELAY_MS);
+
+  // show summary in console & per-card error markers if any
+  results.forEach((res, idx) => {
+    if (!res.ok) {
+      const city = cities[idx];
+      console.warn('Fetch failed for', city, res.error);
+      const r = $(`result_${city}`); if (r) r.textContent = 'Fetch/predict error';
+      const meta = $(`meta_${city}`); if (meta) meta.textContent = 'fetch error';
+    }
+  });
 }
 
+/* ---------- createCards (no fetch) ---------- */
 function createCardsForSelectedCities() {
   const cities = selectedCities();
   if (!cities.length) return alert('Select at least one city');
   $('cardsContainer').innerHTML = '';
   const editable = $('editableByDefault') ? $('editableByDefault').checked : false;
-  for (const city of cities) $('cardsContainer').append(makeCardForCity(city,{editableByDefault: editable}));
+  for (const city of cities) {
+    const card = makeCardForCity(city, { editableByDefault: editable });
+    $('cardsContainer').appendChild(card);
+  }
 }
 
-/* ---------- DOM wiring ---------- */
+/* ---------- DOM wiring (init) ---------- */
 document.addEventListener('DOMContentLoaded', async () => {
   renderChips();
   buildSanitizedMap();
   await loadModelData();
   const fetchBtn = $('fetchCitiesBtn'); if (fetchBtn) fetchBtn.addEventListener('click', fetchLiveForSelectedCities);
   const createBtn = $('createCardsBtn'); if (createBtn) createBtn.addEventListener('click', createCardsForSelectedCities);
-  const predictAll = $('predictAllBtn'); if (predictAll) predictAll.addEventListener('click', async ()=> {
+  const predictAll = $('predictAllBtn'); if (predictAll) predictAll.addEventListener('click', async () => {
     const cards = document.querySelectorAll('#cardsContainer .card');
     for (const card of cards) {
       const city = card.querySelector('h3').textContent;
       await predictForCity(city);
     }
   });
-  const clearBtn = $('clearBtn'); if (clearBtn) clearBtn.addEventListener('click', ()=> { $('cardsContainer').innerHTML = ''; });
+  const clearBtn = $('clearBtn'); if (clearBtn) clearBtn.addEventListener('click', () => { $('cardsContainer').innerHTML = ''; });
   const showLive = $('showLiveBtn'); if (showLive) showLive.addEventListener('click', showLivePanel);
-  const autoToggle = $('autoRefreshToggle'); if (autoToggle) autoToggle.addEventListener('change', (e)=> {
+  const autoToggle = $('autoRefreshToggle'); if (autoToggle) autoToggle.addEventListener('change', (e) => {
     if (e.target.checked) {
-      const cities = selectedCities(); if (!cities.length) { alert('Select a city first'); e.target.checked=false; return; }
+      const cities = selectedCities(); if (!cities.length) { alert('Select a city first'); e.target.checked = false; return; }
       startAutoRefresh(cities[0]);
     } else stopAutoRefresh();
   });
   const modeSel = $('modeSelect');
   if (modeSel) {
-    modeSel.addEventListener('change', (e)=> { const apiCfg = $('apiConfig'); if (apiCfg) apiCfg.classList.toggle('hidden', e.target.value === 'client'); });
+    modeSel.addEventListener('change', (e) => { const apiCfg = $('apiConfig'); if (apiCfg) apiCfg.classList.toggle('hidden', e.target.value === 'client'); });
     const apiCfg = $('apiConfig'); if (apiCfg) apiCfg.classList.toggle('hidden', modeSel.value === 'client');
   }
-});
 
+  // small accessibility: focus first search input if present
+  const searchInput = document.getElementById('citySearch');
+  if (searchInput) {
+    // delay focus slightly (non-intrusive)
+    setTimeout(() => { try { searchInput.focus(); } catch (e) { } }, 500);
+  }
+});
