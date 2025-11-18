@@ -51,6 +51,7 @@ scaler_scale = None
 input_fill = None
 k_default = 5
 _nn = None
+CITIES = None
 
 
 def locate_model_file():
@@ -67,7 +68,7 @@ def locate_model_file():
 
 def load_model_json():
     """Load model JSON and prepare numpy arrays and NearestNeighbors."""
-    global model_md, FEATURES, X_train, y_train, scaler_mean, scaler_scale, input_fill, k_default, _nn
+    global model_md, FEATURES, X_train, y_train, scaler_mean, scaler_scale, input_fill, k_default, _nn, CITIES
 
     path = locate_model_file()
     if path is None:
@@ -78,10 +79,12 @@ def load_model_json():
     with open(path, "r", encoding="utf-8") as f:
         model_md = json.load(f)
 
+    # -- Features
     FEATURES = model_md.get("feature_names") or model_md.get("features") or model_md.get("FEATURES")
     if not isinstance(FEATURES, list) or len(FEATURES) == 0:
         raise RuntimeError("model_data.json must include 'feature_names' (list)")
 
+    # -- Training arrays
     if "X_train" not in model_md or "y_train" not in model_md:
         raise RuntimeError("model_data.json must include 'X_train' and 'y_train' arrays")
 
@@ -102,10 +105,22 @@ def load_model_json():
 
     k_default = int(model_md.get("k", k_default))
 
+    # fit NearestNeighbors on (already scaled) X_train
     _nn = NearestNeighbors(metric="euclidean", n_jobs=-1)
     _nn.fit(X_train)
 
-    logger.info("Model loaded: n_train=%d, n_features=%d, default_k=%d", X_train.shape[0], X_train.shape[1], k_default)
+    # Prepare city list if present
+    if isinstance(model_md.get("cities"), list):
+        CITIES = model_md.get("cities")
+    elif isinstance(model_md.get("city_static"), dict):
+        # keys are city names
+        CITIES = list(model_md.get("city_static").keys())
+    else:
+        # fallback list (small sample) — replace or supply via model_data.json for full top-30
+        CITIES = ["Delhi", "Mumbai", "Kolkata", "Chennai", "Bengaluru", "Hyderabad", "Ahmedabad", "Pune", "Surat", "Jaipur"]
+
+    logger.info("Model loaded: n_train=%d, n_features=%d, default_k=%d, n_cities=%d",
+                X_train.shape[0], X_train.shape[1], k_default, len(CITIES))
     return True
 
 
@@ -124,25 +139,27 @@ def prepare_input_array(features):
         if arr.ndim != 1 or arr.shape[0] != len(FEATURES):
             raise ValueError(f"When features is a list it must have length {len(FEATURES)}")
 
-    # fill missing
+    # fill missing (use input_fill)
     nan_mask = np.isnan(arr)
     if np.any(nan_mask):
         arr[nan_mask] = input_fill[nan_mask]
 
+    # safe scaling (avoid division by zero)
     safe_scale = np.where(scaler_scale == 0.0, 1e-6, scaler_scale)
     arr_scaled = (arr - scaler_mean) / safe_scale
     return arr_scaled
 
 
-def knn_mean_predict_one(x_scaled, k):
-    """Return mean of y_train among k nearest neighbors to x_scaled."""
+def knn_neighbors_mean_and_indices(x_scaled, k):
+    """Return tuple (mean_float, neighbors_indices) for the k nearest neighbors."""
     if _nn is None:
         raise RuntimeError("NearestNeighbors model not fitted")
     n_train = X_train.shape[0]
     k_eff = max(1, min(int(k), n_train))
     dists, idx = _nn.kneighbors(x_scaled.reshape(1, -1), n_neighbors=k_eff)
     neighbors_idx = idx[0]
-    return math.ceil(int(np.mean(y_train[neighbors_idx])))
+    mean_val = float(np.mean(y_train[neighbors_idx]))
+    return mean_val, neighbors_idx
 
 
 # ----- Routes ----- #
@@ -159,11 +176,20 @@ def index():
 def serve_model_json():
     static_file = os.path.join(app.static_folder or STATIC_FOLDER, MODEL_JSON_FILENAME)
     if os.path.exists(static_file):
+        # send_from_directory will set proper headers
         return send_from_directory(app.static_folder or STATIC_FOLDER, MODEL_JSON_FILENAME)
     root_file = os.path.join(os.path.dirname(__file__), MODEL_JSON_FILENAME)
     if os.path.exists(root_file):
         return send_from_directory(os.path.dirname(__file__), MODEL_JSON_FILENAME)
     abort(404, description="model_data.json not found")
+
+
+@app.route("/cities")
+def cities():
+    """Return canonical list of cities for the frontend chips."""
+    if CITIES:
+        return jsonify({"cities": CITIES})
+    return jsonify({"cities": []})
 
 
 @app.route("/predict", methods=["POST"])
@@ -173,7 +199,7 @@ def predict():
       { "features": [...] } or { "features": {"AQI":..., "PM2.5":..., ...} }
     Optional: "k": integer to override default
     Response:
-      { "prediction_raw": <float>, "prediction": <int_ceiling>, "k_used": int, "n_train": int }
+      { "prediction_raw": <float>, "prediction": <int_ceiling>, "k_used": int, "n_train": int, "neighbors": [idx...] }
     """
     payload = request.get_json(silent=True)
     if payload is None:
@@ -191,13 +217,14 @@ def predict():
         return jsonify({"error": f"Invalid features: {str(e)}"}), 400
 
     try:
-        raw_pred = int(math.ceil(knn_mean_predict_one(x_scaled, k)))
-        pred_ceiling = int(math.ceil(raw_pred)) if (raw_pred is not None and not math.isnan(raw_pred)) else None
+        mean_val, neighbors_idx = knn_neighbors_mean_and_indices(x_scaled, k)
+        pred_ceiling = int(math.ceil(mean_val)) if (mean_val is not None and not math.isnan(mean_val)) else None
         response = {
-            "prediction_raw": raw_pred,
+            "prediction_raw": mean_val,
             "prediction": pred_ceiling,
             "k_used": int(k),
-            "n_train": int(X_train.shape[0])
+            "n_train": int(X_train.shape[0]),
+            "neighbors": [int(i) for i in neighbors_idx]
         }
         return jsonify(response)
     except Exception as e:
@@ -214,7 +241,8 @@ def model_info():
         "n_train": int(X_train.shape[0]),
         "n_features": int(X_train.shape[1]),
         "features": FEATURES,
-        "k_default": int(k_default)
+        "k_default": int(k_default),
+        "cities_available": CITIES
     })
 
 
@@ -264,6 +292,3 @@ if __name__ == "__main__":
 
     logger.info("Starting Flask server on http://%s:%s (debug=%s)", HOST, PORT, DEBUG)
     app.run(host=HOST, port=PORT, debug=DEBUG)
-
-
-
