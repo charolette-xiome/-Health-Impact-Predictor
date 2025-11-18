@@ -1,21 +1,149 @@
 <!doctype html>
 <html lang="en">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Respiratory Admissions Predictor — Live Cities</title>
+
+  <!-- core styling -->
   <link rel="stylesheet" href="style.css" />
+
+  <!-- fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=Montserrat:wght@600;800&display=swap"
+    rel="stylesheet">
+
+  <style>
+    /* Minimal inline helpers for hero visuals (kept lightweight). Move to style.css if preferred. */
+    :root {
+      --accent-2: #0ea5e9;
+      --deep-blue: #062b5a;
+    }
+
+    .hero {
+      position: relative;
+      overflow: visible;
+      padding: 28px 24px;
+      border-radius: 14px;
+      background: linear-gradient(180deg, rgba(6, 43, 90, 0.96) 0%, rgba(10, 57, 110, 0.94) 100%);
+      color: white;
+      margin-bottom: 18px;
+      box-shadow: 0 12px 40px rgba(6, 43, 90, 0.18);
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .hero-left {
+      max-width: 62%;
+    }
+
+    .hero h1 {
+      font-family: 'Montserrat', sans-serif;
+      font-size: 28px;
+      margin: 0 0 8px 0;
+    }
+
+    .hero p {
+      margin: 0;
+      color: rgba(255, 255, 255, 0.88);
+      font-size: 14px;
+      line-height: 1.3;
+    }
+
+    .hero-visual {
+      width: 260px;
+      height: 110px;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #bgCanvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border-radius: 10px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    @media (max-width:880px) {
+      .hero {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+      }
+
+      .hero-left {
+        max-width: 100%;
+      }
+
+      .hero-visual {
+        width: 200px;
+        height: 90px;
+      }
+    }
+  </style>
 </head>
 
 <body>
   <main class="container">
-    <h1>Respiratory Admissions Predictor</h1>
+    <!-- HERO -->
+    <section class="hero" aria-label="App hero">
+      <div class="hero-left">
+        <h1>Respiratory Admissions Predictor — Live Cities</h1>
+        <p>
+          Live air-quality, weather and static city features feed a predictor (client KNN or remote API).
+          Select cities, fetch live metrics and run predictions. Use the controls to create editable cards
+          and fetch/update live data.
+        </p>
 
-    <!-- --- Mode selector (client vs API) --- -->
-    <section class="mode">
+        <div style="margin-top:12px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <button id="fetchCitiesBtn" class="primary">Fetch live for selected cities</button>
+          <button id="createCardsBtn">Create cards for selected cities</button>
+          <button id="predictAllBtn">Predict all</button>
+        </div>
+      </div>
+
+      <div class="hero-visual" aria-hidden="true">
+        <!-- decorative SVG (vector) -->
+        <svg width="100%" height="100%" viewBox="0 0 600 240" preserveAspectRatio="xMidYMid slice"
+          style="position:relative; z-index:1;">
+          <defs>
+            <linearGradient id="g1" x1="0" x2="1" y1="0" y2="1">
+              <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.9"></stop>
+              <stop offset="60%" stop-color="#3b82f6" stop-opacity="0.95"></stop>
+              <stop offset="100%" stop-color="#0ea5e9" stop-opacity="0.85"></stop>
+            </linearGradient>
+            <filter id="blur" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="18" />
+            </filter>
+          </defs>
+
+          <g>
+            <path d="M0,140 C120,100 240,200 360,140 C480,80 600,160 720,120 L720,240 L0,240 Z"
+              transform="scale(.9) translate(-40,-20)" fill="url(#g1)" opacity="0.96" filter="url(#blur)"></path>
+            <circle cx="460" cy="50" r="32" fill="#60a5fa" opacity="0.12"></circle>
+            <circle cx="520" cy="90" r="20" fill="#06b6d4" opacity="0.12"></circle>
+          </g>
+        </svg>
+
+        <!-- particle canvas (kept) -->
+        <canvas id="bgCanvas" width="600" height="240" aria-hidden="true"></canvas>
+      </div>
+    </section>
+
+    <!-- Mode selector -->
+    <section class="mode" style="margin-top:12px;">
       <label for="modeSelect">Prediction mode:</label>
       <select id="modeSelect">
-        <option value="client">Client-side (static, uses model_data.json)</option>
+        <option value="client">Client-side (uses model_data.json)</option>
         <option value="api">API (remote endpoint)</option>
       </select>
 
@@ -25,19 +153,12 @@
       </div>
     </section>
 
-    <!-- --- City selection & actions --- -->
-    <section class="city-select">
-      <label>Select cities to fetch live data for (automated & displayed):</label>
-      <div class="city-chips" id="cityChips">
-        <!-- chips inserted by JS -->
-      </div>
+    <!-- City selection & actions -->
+    <section class="city-select" style="margin-top:12px;">
+      <label>Select cities to fetch live data for (choose manually):</label>
 
-      <div class="btn-row" style="margin-top:10px;">
-        <button id="createCardsBtn">Create cards for selected cities</button>
-        <button id="fetchCitiesBtn" class="primary">Fetch live for selected cities</button>
-        <button id="predictAllBtn">Predict all</button>
-        <button id="clearBtn">Clear cards</button>
-      </div>
+      <!-- chips inserted by script.js -->
+      <div class="city-chips" id="cityChips"></div>
 
       <div style="margin-top:10px;">
         <label style="display:inline-flex; align-items:center; gap:8px;">
@@ -47,13 +168,14 @@
       </div>
     </section>
 
-    <!-- ====== Live Data Display (non-destructive add) ====== -->
+    <!-- Live Data Display -->
     <section class="live-display" aria-labelledby="liveLabel" style="margin-top:18px;">
       <h3 id="liveLabel" style="margin-bottom:8px;">Live data (selected city)</h3>
 
-      <!-- controls: typed city takes priority over selected chips -->
-      <div class="live-controls" style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
-        <input id="liveCity" type="text" placeholder="Enter a city name (optional — takes priority)" style="padding:8px 10px; border-radius:8px; border:1px solid #e6eefb; width:220px;" />
+      <div class="live-controls"
+        style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
+        <input id="liveCity" type="text" placeholder="Enter a city name (optional — takes priority)"
+          style="padding:8px 10px; border-radius:8px; border:1px solid #e6eefb; width:220px;" />
 
         <button id="showLiveBtn" type="button" class="primary">Show live data for selected city</button>
 
@@ -64,64 +186,150 @@
 
         <label style="font-size:13px; color:#6b7280; display:inline-flex; align-items:center; gap:6px;">
           Interval (sec):
-          <input id="refreshInterval" type="number" min="10" value="60" style="width:80px; padding:6px; border-radius:8px; border:1px solid #e6eefb;" />
+          <input id="refreshInterval" type="number" min="10" value="60"
+            style="width:80px; padding:6px; border-radius:8px; border:1px solid #e6eefb;" />
         </label>
       </div>
 
-      <!-- live data panel: initially hidden; script will populate fields and show it -->
-      <div id="liveDataPanel" class="live-panel hidden" aria-live="polite" style="border:1px solid #eef6ff; padding:12px; border-radius:10px; background:#fbfdff;">
-        <div class="live-header" style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;">
+      <div id="liveDataPanel" class="live-panel hidden" aria-live="polite"
+        style="border:1px solid #eef6ff; padding:12px; border-radius:10px; background:#fbfdff;">
+        <div class="live-header"
+          style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;">
           <h4 id="liveCityName" style="margin:0; font-size:18px;">—</h4>
           <div id="liveUpdated" class="small-muted" style="font-size:13px; color:#6b7280;">Last updated: —</div>
         </div>
 
         <div class="live-grid" id="liveGrid" style="display:grid; grid-template-columns:repeat(2,1fr); gap:8px 18px;">
-          <!-- Weather -->
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">Temperature (°C)</div><div class="live-value" id="live_temperature" style="font-weight:600">—</div></div>
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">Humidity (%)</div><div class="live-value" id="live_humidity" style="font-weight:600">—</div></div>
+          <div class="live-row">
+            <div class="live-key" style="color:var(--muted);font-size:13px;">Temperature (°C)</div>
+            <div class="live-value" id="live_temperature" style="font-weight:600">—</div>
+          </div>
+          <div class="live-row">
+            <div class="live-key" style="color:var(--muted);font-size:13px;">Humidity (%)</div>
+            <div class="live-value" id="live_humidity" style="font-weight:600">—</div>
+          </div>
 
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">Wind speed (m/s)</div><div class="live-value" id="live_wind_speed" style="font-weight:600">—</div></div>
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">Precipitation (mm, 1h)</div><div class="live-value" id="live_precipitation" style="font-weight:600">—</div></div>
+          <div class="live-row">
+            <div class="live-key" style="color:var(--muted);font-size:13px;">Wind speed (m/s)</div>
+            <div class="live-value" id="live_wind_speed" style="font-weight:600">—</div>
+          </div>
+          <div class="live-row">
+            <div class="live-key" style="color:var(--muted);font-size:13px;">Precipitation (mm, 1h)</div>
+            <div class="live-value" id="live_precipitation" style="font-weight:600">—</div>
+          </div>
 
-          <!-- Pollutants -->
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">PM2.5 (µg/m³)</div><div class="live-value" id="live_PM2_5" style="font-weight:600">—</div></div>
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">PM10 (µg/m³)</div><div class="live-value" id="live_PM10" style="font-weight:600">—</div></div>
+          <div class="live-row">
+            <div class="live-key" style="color:var(--muted);font-size:13px;">PM2.5 (µg/m³)</div>
+            <div class="live-value" id="live_PM2_5" style="font-weight:600">—</div>
+          </div>
+          <div class="live-row">
+            <div class="live-key" style="color:var(--muted);font-size:13px;">PM10 (µg/m³)</div>
+            <div class="live-value" id="live_PM10" style="font-weight:600">—</div>
+          </div>
 
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">NO₂</div><div class="live-value" id="live_NO2" style="font-weight:600">—</div></div>
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">SO₂</div><div class="live-value" id="live_SO2" style="font-weight:600">—</div></div>
+          <div class="live-row">
+            <div class="live-key" style="color:var(--muted);font-size:13px;">NO₂</div>
+            <div class="live-value" id="live_NO2" style="font-weight:600">—</div>
+          </div>
+          <div class="live-row">
+            <div class="live-key" style="color:var(--muted);font-size:13px;">SO₂</div>
+            <div class="live-value" id="live_SO2" style="font-weight:600">—</div>
+          </div>
 
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">O₃</div><div class="live-value" id="live_O3" style="font-weight:600">—</div></div>
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">CO</div><div class="live-value" id="live_CO" style="font-weight:600">—</div></div>
+          <div class="live-row">
+            <div class="live-key" style="color:var(--muted);font-size:13px;">O₃</div>
+            <div class="live-value" id="live_O3" style="font-weight:600">—</div>
+          </div>
+          <div class="live-row">
+            <div class="live-key" style="color:var(--muted);font-size:13px;">CO</div>
+            <div class="live-value" id="live_CO" style="font-weight:600">—</div>
+          </div>
 
-          <!-- AQI & meta -->
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">AQI (India / CPCB)</div><div class="live-value" id="live_AQI" style="font-weight:600">—</div></div>
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">AQI category</div><div class="live-value" id="live_AQI_category" style="font-weight:600">—</div></div>
+          <div class="live-row">
+            <div class="live-key" style="color:var(--muted);font-size:13px;">AQI (India / CPCB)</div>
+            <div class="live-value" id="live_AQI" style="font-weight:600">—</div>
+          </div>
+          <div class="live-row">
+            <div class="live-key" style="color:var(--muted);font-size:13px;">AQI category</div>
+            <div class="live-value" id="live_AQI_category" style="font-weight:600">—</div>
+          </div>
 
-          <!-- Static / model info -->
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">Population density</div><div class="live-value" id="live_population_density" style="font-weight:600">—</div></div>
-          <div class="live-row"><div class="live-key" style="color:var(--muted);font-size:13px;">Green cover %</div><div class="live-value" id="live_green_cover_percentage" style="font-weight:600">—</div></div>
+          <div class="live-row">
+            <div class="live-key" style="color:var(--muted);font-size:13px;">Population density</div>
+            <div class="live-value" id="live_population_density" style="font-weight:600">—</div>
+          </div>
+          <div class="live-row">
+            <div class="live-key" style="color:var(--muted);font-size:13px;">Green cover %</div>
+            <div class="live-value" id="live_green_cover_percentage" style="font-weight:600">—</div>
+          </div>
         </div>
       </div>
     </section>
-    <!-- ===== end Live Data Display ===== -->
 
-    <!-- --- Cards container (predictor) --- -->
-    <section id="cardsContainer" class="cards-grid" style="margin-top:18px;">
-      <!-- city cards (one per city) will be inserted here by script.js -->
-    </section>
-
-    <!-- --- Notes --- -->
-    <section class="instructions" style="margin-top:18px;">
-      <h3>Notes</h3>
-      <ul>
-        <li>Client mode expects a <code>model_data.json</code> in the same repo (or served at <code>/model_data.json</code>).</li>
-        <li>API mode expects a POST JSON endpoint accepting <code>{"features":[...]}</code> → <code>{"prediction": number}</code>.</li>
-        <li>For accurate AQI & to keep keys secret, run API calls from the server (e.g. <code>/api/air?city=Delhi</code>) rather than directly from the browser.</li>
-      </ul>
-    </section>
+    <!-- Cards container -->
+    <section id="cardsContainer" class="cards-grid" style="margin-top:18px;"></section>
   </main>
 
-  <!-- your script (defer so DOM exists) -->
+  <!-- script -->
   <script src="script.js" defer></script>
+
+  <!-- particle canvas script (kept) -->
+  <script>
+    (function () {
+      const canvas = document.getElementById('bgCanvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      function resize() {
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * devicePixelRatio;
+        canvas.height = rect.height * devicePixelRatio;
+        ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+      }
+      const particles = [];
+      const N = 24;
+      let w = 0, h = 0;
+      function init() {
+        const r = canvas.getBoundingClientRect();
+        w = r.width; h = r.height;
+        particles.length = 0;
+        for (let i = 0; i < N; i++) {
+          particles.push({
+            x: Math.random() * w,
+            y: Math.random() * h,
+            r: 2 + Math.random() * 6,
+            vx: (Math.random() - 0.5) * 0.6,
+            vy: (Math.random() - 0.5) * 0.6,
+            alpha: 0.18 + Math.random() * 0.42,
+            hue: 190 + Math.random() * 60
+          });
+        }
+      }
+      let raf;
+      function step() {
+        ctx.clearRect(0, 0, w, h);
+        for (const p of particles) {
+          p.x += p.vx;
+          p.y += p.vy;
+          if (p.x < -20) p.x = w + 20;
+          if (p.x > w + 20) p.x = -20;
+          if (p.y < -20) p.y = h + 20;
+          if (p.y > h + 20) p.y = -20;
+          ctx.beginPath();
+          ctx.fillStyle = "hsla(" + p.hue + ",70% , 60% , " + p.alpha + ")";
+          ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        raf = requestAnimationFrame(step);
+      }
+      function start() {
+        resize(); init();
+        if (raf) cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(step);
+      }
+      window.addEventListener('resize', () => { try { resize(); init(); } catch (e) { } });
+      window.setTimeout(start, 220);
+    })();
+  </script>
 </body>
+
 </html>
